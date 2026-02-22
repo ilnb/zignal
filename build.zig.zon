@@ -1,0 +1,12 @@
+.{
+    .name = .server,
+    .version = "0.0.0",
+    .fingerprint = 0x5a6dd5f6998506b2,
+    .minimum_zig_version = "0.15.2",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "README.md",
+    },
+}
