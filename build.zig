@@ -4,20 +4,8 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const clients = b.createModule(.{
-        .root_source_file = b.path("src/client.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
     const avl = b.createModule(.{
         .root_source_file = b.path("src/avl_set.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
-    const utils = b.createModule(.{
-        .root_source_file = b.path("src/utils.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -29,6 +17,21 @@ pub fn build(b: *std.Build) void {
         .imports = &.{
             .{ .name = "avl", .module = avl },
         },
+    });
+
+    const clients = b.createModule(.{
+        .root_source_file = b.path("src/client.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "types", .module = types },
+        },
+    });
+
+    const utils = b.createModule(.{
+        .root_source_file = b.path("src/utils.zig"),
+        .target = target,
+        .optimize = optimize,
     });
 
     const exe = b.addExecutable(.{
