@@ -26,6 +26,9 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/types.zig"),
         .target = target,
         .optimize = optimize,
+        .imports = &.{
+            .{ .name = "avl", .module = avl },
+        },
     });
 
     const exe = b.addExecutable(.{
