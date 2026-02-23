@@ -211,7 +211,7 @@ fn parseHeaderAndAct(client: *Client, msg: []u8, state: *State) void {
     var write_buf: [1024]u8 = undefined;
     const header = itr.next() orelse return;
     if (eql(u8, header, "ECHO")) {
-        const to_echo = msg[header.len..];
+        const to_echo = itr.rest();
         client.writer_mutex.lock();
         defer client.writer_mutex.unlock();
         var writer = client.conn.stream.writer(&write_buf);
