@@ -19,8 +19,8 @@ pub fn build(b: *std.Build) void {
         },
     });
 
-    const clients = b.createModule(.{
-        .root_source_file = b.path("src/client.zig"),
+    const utils = b.createModule(.{
+        .root_source_file = b.path("src/utils.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{
@@ -28,10 +28,14 @@ pub fn build(b: *std.Build) void {
         },
     });
 
-    const utils = b.createModule(.{
-        .root_source_file = b.path("src/utils.zig"),
+    const clients = b.createModule(.{
+        .root_source_file = b.path("src/client.zig"),
         .target = target,
         .optimize = optimize,
+        .imports = &.{
+            .{ .name = "types", .module = types },
+            .{ .name = "utils", .module = utils },
+        },
     });
 
     const exe = b.addExecutable(.{

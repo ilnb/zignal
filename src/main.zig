@@ -38,16 +38,16 @@ pub fn main() !void {
     info("Server listening on port {d}", .{port});
 
     var state = State{
-        .clients = std.ArrayList(*Client).empty,
-        .connections = std.AutoHashMap(usize, Set(usize)).init(ga),
+        .clients = .empty,
+        .links = std.AutoHashMap(usize, Set(usize)).init(ga),
         .ga = &ga,
         .mutex = .{},
     };
     defer {
         state.clients.deinit(ga);
-        var itr = state.connections.iterator();
+        var itr = state.links.iterator();
         while (itr.next()) |e| e.value_ptr.deinit();
-        state.connections.deinit();
+        state.links.deinit();
     }
 
     var id: usize = 0;
@@ -70,10 +70,12 @@ pub fn main() !void {
             .conn = conn,
             .name = null,
             .writer_mutex = .{},
+            .active = .empty,
+            .active_mutex = .{},
         };
 
         try state.clients.append(ga, client);
-        try state.connections.put(id, .init(ga, utils.usizeCmp));
+        try state.links.put(id, .init(ga, utils.usizeCmp));
 
         _ = try std.Thread.spawn(.{}, client_mod.handleClient, .{ client, &state });
         id += 1;
