@@ -27,7 +27,10 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(ga);
     defer std.process.argsFree(ga, args);
 
-    const port = if (args.len == 1) 8000 else if (args.len == 2) try std.fmt.parseInt(u16, args[1], 10) else {
+    const port = if (args.len == 1) 8000 else if (args.len == 2) std.fmt.parseInt(u16, args[1], 10) catch |err| {
+        std.debug.print("Error when parsing port number: {any}\n", .{err});
+        return;
+    } else {
         std.debug.print("args.len > 2", .{});
         return;
     };
