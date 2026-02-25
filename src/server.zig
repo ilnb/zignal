@@ -6,7 +6,7 @@ const types = @import("types");
 const Client = types.Client;
 const State = types.State;
 const Set = types.Set;
-const client_mod = @import("client_mod");
+const client_mod = @import("client");
 const utils = @import("utils");
 
 var running = std.atomic.Value(bool).init(true);

@@ -164,7 +164,7 @@ fn displayClient(client: *Client, to_fetch: *Client, state: *State) void {
     defer client.writer_mutex.unlock();
     var writer = client.conn.stream.writer(&write_buf);
     const w = &writer.interface;
-    errWrite(w, "id\tNAME\tLINK\n", .{}, client) orelse return;
+    errWrite(w, "ID\tNAME\tLINK\n", .{}, client) orelse return;
     errWrite(w, "{d}\t{s}", .{ to_fetch.id, to_fetch.name orelse "NA" }, client) orelse return;
     if (to_fetch.id == client.id) {
         errWrite(w, "*", .{}, client) orelse return;
@@ -189,7 +189,7 @@ fn displayAll(client: *Client, state: *State) void {
     var writer = client.conn.stream.writer(&buf);
     const w = &writer.interface;
 
-    errWrite(w, "id\tNAME\tLINK\n", .{}, client) orelse return;
+    errWrite(w, "ID\tNAME\tLINK\n", .{}, client) orelse return;
     for (state.clients.items) |c| {
         errWrite(w, "{d}\t{s}", .{ c.id, c.name orelse "NA" }, client) orelse return;
         if (c.id == client.id) {
@@ -299,7 +299,7 @@ fn parseHeaderAndAct(client: *Client, msg: []u8, state: *State) void {
             defer client.writer_mutex.unlock();
             var writer = client.conn.stream.writer(&write_buf);
             const w = &writer.interface;
-            errWrite(w, "No id or name specified", .{}, client) orelse return;
+            errWrite(w, "No id or name specified\n", .{}, client) orelse return;
             errFlush(w, client) orelse return;
             return;
         }
@@ -319,7 +319,7 @@ fn parseHeaderAndAct(client: *Client, msg: []u8, state: *State) void {
             defer client.writer_mutex.unlock();
             var writer = client.conn.stream.writer(&write_buf);
             const w = &writer.interface;
-            errWrite(w, "No id or name specified", .{}, client) orelse return;
+            errWrite(w, "No id or name specified\n", .{}, client) orelse return;
             errFlush(w, client) orelse return;
             return;
         }
@@ -349,7 +349,7 @@ fn parseHeaderAndAct(client: *Client, msg: []u8, state: *State) void {
             defer client.writer_mutex.unlock();
             var writer = client.conn.stream.writer(&write_buf);
             const w = &writer.interface;
-            errWrite(w, "No id or name specified", .{}, client) orelse return;
+            errWrite(w, "No id or name specified\n", .{}, client) orelse return;
             errFlush(w, client) orelse return;
             return;
         }
@@ -379,7 +379,7 @@ fn parseHeaderAndAct(client: *Client, msg: []u8, state: *State) void {
             defer client.writer_mutex.unlock();
             var writer = client.conn.stream.writer(&write_buf);
             const w = &writer.interface;
-            errWrite(w, "No id or name specified", .{}, client) orelse return;
+            errWrite(w, "No id or name specified\n", .{}, client) orelse return;
             errFlush(w, client) orelse return;
             return;
         }
