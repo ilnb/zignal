@@ -6,7 +6,7 @@ const types = @import("types");
 const Client = types.Client;
 const State = types.State;
 const Set = types.Set;
-const server = @import("server");
+const server_mod = @import("server");
 const utils = @import("utils");
 
 var running = std.atomic.Value(bool).init(true);
@@ -42,10 +42,12 @@ pub fn main() !void {
 
     var wbuf: [1024]u8 = undefined;
     var writer_file = stream.writer(&wbuf).file_writer;
+    defer writer_file.file.close();
     const writer = &writer_file.interface;
 
     var rbuf: [1024]u8 = undefined;
     var reader_file = stream.reader(&rbuf).file_reader;
+    defer reader_file.file.close();
     const reader = &reader_file.interface;
 
     var stdin_buf: [1024]u8 = undefined;
@@ -62,6 +64,8 @@ pub fn main() !void {
         .flags = 0,
     };
     posix.sigaction(posix.SIG.INT, &sa, null);
+
+    server_mod.handshakeWithServer(&stream, writer) catch return;
 
     const recv_thread = std.Thread.spawn(.{}, recvFn, .{ reader, stdout }) catch |err| {
         std.debug.print("Error when trying to spawn thread.\nErr: {any}\n", .{err});
