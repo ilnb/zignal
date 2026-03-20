@@ -132,7 +132,7 @@ pub fn main() !void {
         const no_timeout = posix.timeval{ .sec = 0, .usec = 0 };
         try posix.setsockopt(conn.stream.handle, posix.SOL.SOCKET, posix.SO.RCVTIMEO, &std.mem.toBytes(no_timeout));
 
-        const new_client: bool, var token: Token = client_mod.handshakeWithClient(conn, &state) catch |err| {
+        const new_client, var token = client_mod.handshakeWithClient(conn, &state) catch |err| {
             info("Handshake failed with client {f} with error {any}. Terminating connection", .{ conn.address, err });
             const writer = conn.stream.writer(&buf);
             var interface = writer.interface;

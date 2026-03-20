@@ -312,7 +312,7 @@ fn parseHeaderAndAct(client: *Client, msg: []u8, state: *State) void {
             info("Corrupted tokens list. Client with {d} not found.\n", .{client.id});
             return;
         };
-        if (!std.mem.eql(u8, token.name, "NA")) state.ga.free(token.name);
+        state.ga.free(token.name);
         token.name = state.ga.dupe(u8, name) catch |err| {
             info("Failed to set name for {d}: {any}", .{ client.id, err });
             return;
@@ -439,7 +439,7 @@ fn parseHeaderAndAct(client: *Client, msg: []u8, state: *State) void {
     }
 }
 
-pub fn handshakeWithClient(conn: net.Server.Connection, state: *State) error{ UnknownToken, KnownToken, BadHandshake }!.{ bool, Token } {
+pub fn handshakeWithClient(conn: net.Server.Connection, state: *State) !struct { bool, Token } {
     var buf: [128]u8 = undefined;
     var reader_file = conn.stream.reader(buf[0..64]).file_reader;
     const reader = &reader_file.interface;
@@ -453,7 +453,7 @@ pub fn handshakeWithClient(conn: net.Server.Connection, state: *State) error{ Un
 
     var idx: i32 = -1;
     for (state.tokens.items, 0..) |t, i| {
-        if (std.mem.eql(t.id, token_id)) {
+        if (std.mem.eql(u8, t.id, token_id)) {
             idx = @intCast(i);
             break;
         }
@@ -467,6 +467,6 @@ pub fn handshakeWithClient(conn: net.Server.Connection, state: *State) error{ Un
         if (std.mem.eql(u8, new_or_old, "OLD")) return error.UnknownToken;
         try writer.writeAll("OK\n");
         try writer.flush();
-        return .{ true, Token{ .id = try state.ga.dupe(u8, token_id), .name = "NA", .rid = 69 } };
+        return .{ true, Token{ .id = try state.ga.dupe(u8, token_id), .name = try state.ga.dupe(u8, "NA"), .rid = 69 } };
     }
 }
