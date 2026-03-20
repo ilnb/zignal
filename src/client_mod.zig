@@ -3,29 +3,40 @@ const bufPrint = std.fmt.bufPrint;
 const types = @import("types");
 const Client = types.Client;
 
-pub fn handshakeWithServer(s: *std.net.Stream, profile: []const u8) !void {
+pub fn handshakeWithServer(s: *std.net.Stream, profile: []const u8) !std.fs.Dir {
     const home = std.posix.getenv("HOME") orelse return error.NoHomeDir;
-    var pbuf: [1024]u8, var buf: [1024]u8 = .{ undefined, undefined };
-    const profile_dir = try bufPrint(&pbuf, "{s}/.config/zignal/{s}", .{ home, profile });
-    std.fs.makeDirAbsolute(profile_dir) catch |err| switch (err) {
-        error.PathAlreadyExists => {},
+    var buf: [1024]u8 = undefined;
+    var home_dir = try std.fs.openDirAbsolute(home, .{});
+    defer home_dir.close();
+
+    const profile_path = try bufPrint(&buf, ".config/zignal/client/{s}", .{profile});
+    try home_dir.makePath(profile_path);
+    var profile_dir = try home_dir.openDir(profile_path, .{});
+
+    const lock_file = try profile_dir.createFile("lock", .{ .exclusive = true });
+    lock_file.close();
+    errdefer profile_dir.deleteFile("lock") catch {};
+
+    const token_file = profile_dir.openFile("token", .{ .mode = .read_write }) catch |err| switch (err) {
+        error.FileNotFound => blk: {
+            break :blk try profile_dir.createFile("token", .{ .truncate = false });
+        },
         else => return err,
     };
-    const lock_file = std.fs.createFileAbsolute(try bufPrint(&buf, "{s}/lock", .{profile_dir}), .{ .exclusive = true }) catch |err| return err;
-    lock_file.close();
-    const token_path = try bufPrint(&buf, "{s}/token", .{profile_dir});
-    var new_user = false;
-    const token_file = blk: {
-        break :blk std.fs.openFileAbsolute(token_path, .{ .mode = .read_only }) catch |err| switch (err) {
-            error.FileNotFound => {
-                try createToken(token_path);
-                new_user = true;
-                break :blk try std.fs.openFileAbsolute(token_path, .{ .mode = .read_only });
-            },
-            else => return err,
-        };
-    };
     defer token_file.close();
+
+    const new_user = (try token_file.stat()).size == 0;
+    if (new_user) {
+        var token_bytes: [16]u8 = undefined;
+        std.crypto.random.bytes(&token_bytes);
+        const hex = std.fmt.bytesToHex(token_bytes, .lower);
+        var token_w = token_file.writer(&buf);
+        const writer = &token_w.interface;
+        try writer.writeAll(&hex);
+        try writer.flush();
+        try token_file.seekTo(0);
+    }
+
     var token_r = token_file.reader(buf[0..40]);
     const t_reader = &token_r.interface;
     const token = try t_reader.take(32);
@@ -37,21 +48,19 @@ pub fn handshakeWithServer(s: *std.net.Stream, profile: []const u8) !void {
 
     var s_reader_file = s.reader(buf[80..]).file_reader;
     const s_reader = &s_reader_file.interface;
-    const msg = try s_reader.takeDelimiter('\n') orelse return error.EOF;
-    if (std.mem.eql(u8, "OK", msg)) return;
+    const msg = try s_reader.takeDelimiter('\n') orelse return error.EndOfStream;
+    if (std.mem.eql(u8, "OK", msg)) return profile_dir;
     std.debug.print("Handshake error: {s}\n", .{msg});
     return error.HandshakeFailed;
 }
 
-fn createToken(token_path: []const u8) !void {
+fn createToken(token_file: std.fs.File) !void {
+    var token_bytes: [16]u8 = undefined;
+    std.crypto.random.bytes(&token_bytes);
+    const hex = std.fmt.bytesToHex(token_bytes, .lower);
     var buf: [64]u8 = undefined;
-    const token_file = std.fs.openFileAbsolute(token_path, .{ .mode = .write_only }) catch |err| return err;
-    defer token_file.close();
     var token_w = token_file.writer(&buf);
     const writer = &token_w.interface;
-    std.crypto.random.bytes(buf[0..16]);
-    var token_hex: [32]u8 = undefined;
-    try bufPrint(&token_hex, "{}", .{std.fmt.bytesToHex(buf[0..16], .lower)});
-    try writer.writeAll(&token_hex);
+    try writer.writeAll(&hex);
     try writer.flush();
 }

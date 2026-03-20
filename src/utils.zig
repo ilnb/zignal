@@ -5,6 +5,7 @@ const Writer = std.Io.Writer;
 const types = @import("types");
 const Client = types.Client;
 const State = types.State;
+const Token = types.Token;
 
 pub fn usizeCmp(a: usize, b: usize) std.math.Order {
     return std.math.order(a, b);
@@ -33,6 +34,12 @@ pub fn getClientById(buf: []const u8, state: *State) ?*Client {
 
 pub fn getClientByName(buf: []const u8, state: *State) ?*Client {
     return for (state.clients.items) |c| {
-        if (eql(u8, c.name orelse "", buf)) break c;
+        if (eql(u8, c.name, buf)) break c;
     } else return null;
+}
+
+pub fn getClientNameByToken(state: *State, token: *Token) ?[]u8 {
+    return for (state.tokens.items) |t| {
+        if (t.id == token.id) break token.name;
+    } else null;
 }

@@ -5,7 +5,9 @@ const net = std.net;
 const types = @import("types");
 const Client = types.Client;
 const State = types.State;
+const Token = types.Token;
 const utils = @import("utils");
+const bufPrint = std.fmt.bufPrint;
 const errWrite = utils.errWrite;
 const errFlush = utils.errFlush;
 const getClientById = utils.getClientById;
@@ -106,7 +108,7 @@ fn sendMsg(from: *Client, to: *Client, to_send: []const u8) void {
         defer from.writer_mutex.unlock();
         var writer = from.conn.stream.writer(&buf);
         const w = &writer.interface;
-        errWrite(w, "Not connected to {s}.\n", .{to.name orelse "NA"}, from) orelse return;
+        errWrite(w, "Not connected to {s}.\n", .{to.name}, from) orelse return;
         errFlush(w, from) orelse return;
         return;
     };
@@ -120,7 +122,7 @@ fn sendMsg(from: *Client, to: *Client, to_send: []const u8) void {
         defer to.writer_mutex.unlock();
         var writer = to.conn.stream.writer(&buf);
         const w = &writer.interface;
-        errWrite(w, "Not connected to {s}.\n", .{from.name orelse "NA"}, to) orelse return;
+        errWrite(w, "Not connected to {s}.\n", .{from.name}, to) orelse return;
         errFlush(w, to) orelse return;
         return;
     };
@@ -139,7 +141,7 @@ fn sendMsg(from: *Client, to: *Client, to_send: []const u8) void {
     defer to.writer_mutex.unlock();
     var writer = to.conn.stream.writer(&buf);
     const w = &writer.interface;
-    errWrite(w, "({s}, {d}): {s}", .{ from.name orelse "NA", from.id, to_send }, to) orelse return;
+    errWrite(w, "({s}, {d}): {s}", .{ from.name, from.id, to_send }, to) orelse return;
     errFlush(w, to) orelse return;
 }
 
@@ -153,7 +155,7 @@ fn sendAll(from: *Client, to_send: []const u8) void {
         defer c.writer_mutex.unlock();
         var writer = c.conn.stream.writer(&buf);
         const w = &writer.interface;
-        errWrite(w, "({s}, {d}): {s}", .{ from.name orelse "NA", from.id, to_send }, c) orelse return;
+        errWrite(w, "({s}, {d}): {s}", .{ from.name, from.id, to_send }, c) orelse return;
         errFlush(w, c) orelse return;
     }
 }
@@ -165,7 +167,7 @@ fn displayClient(client: *Client, to_fetch: *Client, state: *State) void {
     var writer = client.conn.stream.writer(&write_buf);
     const w = &writer.interface;
     errWrite(w, "ID\tNAME\tLINK\n", .{}, client) orelse return;
-    errWrite(w, "{d}\t{s}", .{ to_fetch.id, to_fetch.name orelse "NA" }, client) orelse return;
+    errWrite(w, "{d}\t{s}", .{ to_fetch.id, to_fetch.name }, client) orelse return;
     if (to_fetch.id == client.id) {
         errWrite(w, "*", .{}, client) orelse return;
     }
@@ -191,7 +193,7 @@ fn displayAll(client: *Client, state: *State) void {
 
     errWrite(w, "ID\tNAME\tLINK\n", .{}, client) orelse return;
     for (state.clients.items) |c| {
-        errWrite(w, "{d}\t{s}", .{ c.id, c.name orelse "NA" }, client) orelse return;
+        errWrite(w, "{d}\t{s}", .{ c.id, c.name }, client) orelse return;
         if (c.id == client.id) {
             errWrite(w, "*", .{}, client) orelse return;
         }
@@ -242,7 +244,6 @@ fn cleanupClient(client: *Client, state: *State) void {
     const id = client.id;
     state.mutex.lock();
     defer state.mutex.unlock();
-    if (client.name != null) state.ga.free(client.name.?);
     const clients = &state.clients;
     for (clients.items, 0..) |c, i| {
         if (c == client) {
@@ -265,6 +266,7 @@ fn cleanupClient(client: *Client, state: *State) void {
             }
         }
     }
+    client.conn.stream.close();
     state.ga.destroy(client);
 }
 
@@ -288,7 +290,7 @@ fn parseHeaderAndAct(client: *Client, msg: []u8, state: *State) void {
         defer client.writer_mutex.unlock();
         var writer = client.conn.stream.writer(&write_buf);
         const w = &writer.interface;
-        errWrite(w, "name: {s}, id: {d}\n", .{ client.name orelse "NA", client.id }, client) orelse return;
+        errWrite(w, "name: {s}, id: {d}\n", .{ client.name, client.id }, client) orelse return;
         errFlush(w, client) orelse return;
     } else if (eql(u8, header, "NAME")) {
         const nbuf = while (itr.next()) |s| {
@@ -304,11 +306,18 @@ fn parseHeaderAndAct(client: *Client, msg: []u8, state: *State) void {
             return;
         }
         const name = nbuf.?;
-        if (client.name != null) state.ga.free(client.name.?);
-        client.name = state.ga.dupe(u8, name) catch |err| {
+        const token: *Token = for (state.tokens.items) |*t| {
+            if (t.rid == client.id) break t;
+        } else {
+            info("Corrupted tokens list. Client with {d} not found.\n", .{client.id});
+            return;
+        };
+        if (!std.mem.eql(u8, token.name, "NA")) state.ga.free(token.name);
+        token.name = state.ga.dupe(u8, name) catch |err| {
             info("Failed to set name for {d}: {any}", .{ client.id, err });
             return;
         };
+        client.name = token.name;
         info("Named {d} -> {s}\n", .{ client.id, name });
     } else if (eql(u8, header, "LINK")) {
         const nbuf = while (itr.next()) |s| {
@@ -427,5 +436,37 @@ fn parseHeaderAndAct(client: *Client, msg: []u8, state: *State) void {
         } else {
             displayAll(client, state);
         }
+    }
+}
+
+pub fn handshakeWithClient(conn: net.Server.Connection, state: *State) error{ UnknownToken, KnownToken, BadHandshake }!.{ bool, Token } {
+    var buf: [128]u8 = undefined;
+    var reader_file = conn.stream.reader(buf[0..64]).file_reader;
+    const reader = &reader_file.interface;
+    var writer_file = conn.stream.writer(buf[64..]).file_writer;
+    const writer = &writer_file.interface;
+    const msg = try reader.takeDelimiter('\n') orelse return error.BadHandshake;
+
+    var itr = std.mem.splitScalar(u8, msg, ' ');
+    const new_or_old = itr.next() orelse return error.BadHandshake;
+    const token_id = itr.next() orelse return error.BadHandshake;
+
+    var idx: i32 = -1;
+    for (state.tokens.items, 0..) |t, i| {
+        if (std.mem.eql(t.id, token_id)) {
+            idx = @intCast(i);
+            break;
+        }
+    }
+    if (idx != -1) {
+        if (std.mem.eql(u8, new_or_old, "NEW")) return error.KnownToken;
+        try writer.writeAll("OK");
+        try writer.flush();
+        return .{ false, state.tokens.items[@intCast(idx)] };
+    } else {
+        if (std.mem.eql(u8, new_or_old, "OLD")) return error.UnknownToken;
+        try writer.writeAll("OK\n");
+        try writer.flush();
+        return .{ true, Token{ .id = try state.ga.dupe(u8, token_id), .name = "NA", .rid = 69 } };
     }
 }
