@@ -5,9 +5,8 @@ const Client = types.Client;
 
 pub fn handshakeWithServer(s: *std.net.Stream, profile: []const u8) !void {
     const home = std.posix.getenv("HOME") orelse return error.NoHomeDir;
-    var pbuf: [1024]u8 = undefined;
+    var pbuf: [1024]u8, var buf: [1024]u8 = .{ undefined, undefined };
     const profile_dir = try bufPrint(&pbuf, "{s}/.config/zignal/{s}", .{ home, profile });
-    var buf: [1024]u8 = undefined;
     std.fs.makeDirAbsolute(profile_dir) catch |err| switch (err) {
         error.PathAlreadyExists => {},
         else => return err,
