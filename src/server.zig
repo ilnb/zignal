@@ -38,27 +38,29 @@ pub fn main() !void {
         \\ -P, --profile <name>  Specify profile, defaults to "default"
     ;
 
-    var i: usize = 0;
-    while (i < args.len) : (i += 1) {
-        if (std.mem.eql(u8, args[i], "--profile") or std.mem.eql(u8, args[i], "-P")) {
-            if (i + 1 == args.len) {
-                std.debug.print("Missing profile name. Try -h for more information.\n", .{});
-                return;
+    {
+        var i: usize = 0;
+        while (i < args.len) : (i += 1) {
+            if (std.mem.eql(u8, args[i], "--profile") or std.mem.eql(u8, args[i], "-P")) {
+                if (i + 1 == args.len) {
+                    std.debug.print("Missing profile name. Try -h for more information.\n", .{});
+                    return;
+                }
+                i += 1;
+                profile = args[i];
+            } else if (std.mem.eql(u8, args[i], "--port") or std.mem.eql(u8, args[i], "-p")) {
+                if (i + 1 == args.len) {
+                    std.debug.print("Missing port number. Try -h for more information.\n", .{});
+                    return;
+                }
+                i += 1;
+                port = std.fmt.parseInt(u16, args[i], 10) catch |err| {
+                    std.debug.print("Error when parsing port number: {any}\n", .{err});
+                    return;
+                };
+            } else if (std.mem.eql(u8, args[i], "--help") or std.mem.eql(u8, args[i], "-h")) {
+                std.debug.print("{s}\n", .{help_msg});
             }
-            i += 1;
-            profile = args[i];
-        } else if (std.mem.eql(u8, args[i], "--port") or std.mem.eql(u8, args[i], "-p")) {
-            if (i + 1 == args.len) {
-                std.debug.print("Missing port number. Try -h for more information.\n", .{});
-                return;
-            }
-            i += 1;
-            port = std.fmt.parseInt(u16, args[i], 10) catch |err| {
-                std.debug.print("Error when parsing port number: {any}\n", .{err});
-                return;
-            };
-        } else if (std.mem.eql(u8, args[i], "--help") or std.mem.eql(u8, args[i], "-h")) {
-            std.debug.print("{s}\n", .{help_msg});
         }
     }
 
@@ -71,6 +73,7 @@ pub fn main() !void {
     const profile_path = try bufPrint(&buf, ".config/zignal/server/{s}", .{profile});
     try home_dir.makePath(profile_path);
     var profile_dir = try home_dir.openDir(profile_path, .{});
+    defer profile_dir.close();
 
     const lock_file = profile_dir.createFile("lock", .{ .exclusive = true }) catch |err| switch (err) {
         error.PathAlreadyExists => {
@@ -80,7 +83,6 @@ pub fn main() !void {
         else => return err,
     };
     lock_file.close();
-    defer profile_dir.close();
     defer profile_dir.deleteFile("lock") catch {};
 
     const addr = net.Address.initIp4(.{0} ** 4, port);
@@ -98,20 +100,26 @@ pub fn main() !void {
         .ga = &ga,
         .mutex = .{},
         .tokens = .empty,
+        .profile_dir = profile_dir,
     };
     defer {
-        for (state.tokens.items) |token| {
-            state.ga.free(token.id);
-            state.ga.free(token.name);
+        const aa = state.ga;
+        const tokens = &state.tokens;
+        const clients = &state.clients;
+        const links = &state.links;
+        for (tokens.items) |token| {
+            aa.free(token.id);
+            aa.free(token.name);
         }
-        state.tokens.deinit(state.ga.*);
-        state.clients.deinit(state.ga.*);
-        var itr = state.links.iterator();
+        for (clients.items) |c| aa.destroy(c);
+        tokens.deinit(aa.*);
+        clients.deinit(aa.*);
+        var itr = links.iterator();
         while (itr.next()) |e| e.value_ptr.deinit();
-        state.links.deinit();
+        links.deinit();
     }
 
-    try populateTokens(&state, profile_dir);
+    try populateTokens(&state);
 
     const sa = posix.Sigaction{
         .handler = .{ .handler = handleSig },
@@ -120,7 +128,7 @@ pub fn main() !void {
     };
     posix.sigaction(posix.SIG.INT, &sa, null);
 
-    var id: usize = 0;
+    var id: usize = 1;
     while (running.load(.acquire)) {
         const conn = server.accept() catch |err| switch (err) {
             error.WouldBlock => continue,
@@ -132,41 +140,75 @@ pub fn main() !void {
         const no_timeout = posix.timeval{ .sec = 0, .usec = 0 };
         try posix.setsockopt(conn.stream.handle, posix.SOL.SOCKET, posix.SO.RCVTIMEO, &std.mem.toBytes(no_timeout));
 
-        const new_client, var token = client_mod.handshakeWithClient(conn, &state) catch |err| {
+        var result = client_mod.handshakeWithClient(conn, &state) catch |err| {
             info("Handshake failed with client {f} with error {any}. Terminating connection", .{ conn.address, err });
-            const writer = conn.stream.writer(&buf);
-            var interface = writer.interface;
+            var writer = conn.stream.writer(&buf);
+            const interface = &writer.interface;
             try interface.print("{any}\n", .{err});
             try interface.flush();
             conn.stream.close();
             continue;
         };
 
-        token.rid = id;
+        var client: *Client = undefined;
 
-        const client = try ga.create(Client);
-        client.* = Client{
-            .id = id,
-            .conn = conn,
-            .name = token.name,
-            .writer_mutex = .{},
-            .active = .empty,
-            .active_mutex = .{},
-        };
-
-        try state.clients.append(state.ga.*, client);
-        if (new_client) try state.tokens.append(state.ga.*, token);
-        try state.links.put(id, .init(state.ga.*, utils.usizeCmp));
+        switch (result) {
+            .new => |*token| {
+                token.rid = id;
+                id += 1;
+                client = try ga.create(Client);
+                client.* = Client{
+                    .id = token.rid,
+                    .conn = conn,
+                    .name = token.name,
+                    .online = true,
+                    .writer_mutex = .{},
+                    .active = .empty,
+                    .active_mutex = .{},
+                };
+                try appendTokenToFile(token, profile_dir);
+                try state.tokens.append(state.ga.*, token.*);
+                try state.links.put(token.rid, .init(state.ga.*, utils.usizeCmp));
+                try state.clients.append(state.ga.*, client);
+            },
+            .existing => |idx| {
+                const token = &state.tokens.items[idx];
+                if (token.rid == 0) {
+                    token.rid = id;
+                    id += 1;
+                }
+                const client_idx: usize = for (state.clients.items, 0..) |c, i| {
+                    if (c.id == token.rid) break i;
+                } else std.math.maxInt(usize);
+                if (client_idx != std.math.maxInt(usize)) {
+                    client = state.clients.items[client_idx];
+                    client.conn = conn;
+                    client.online = true;
+                } else {
+                    client = try ga.create(Client);
+                    client.* = Client{
+                        .id = token.rid,
+                        .conn = conn,
+                        .name = token.name,
+                        .online = true,
+                        .writer_mutex = .{},
+                        .active = .empty,
+                        .active_mutex = .{},
+                    };
+                    try state.clients.append(state.ga.*, client);
+                    try state.links.put(token.rid, .init(state.ga.*, utils.usizeCmp));
+                }
+            },
+        }
 
         _ = try std.Thread.spawn(.{}, client_mod.handleClient, .{ client, &state });
-        id += 1;
     }
     info("Closing the server", .{});
 }
 
-fn populateTokens(state: *State, profile_dir: std.fs.Dir) !void {
+fn populateTokens(state: *State) !void {
     var buf: [1024]u8 = undefined;
-    const token_file = try profile_dir.createFile("token", .{ .truncate = false });
+    const token_file = try state.profile_dir.createFile("token", .{ .truncate = false, .read = true });
     defer token_file.close();
     var token_file_r = token_file.reader(&buf);
     const reader = &token_file_r.interface;
@@ -189,10 +231,23 @@ fn populateTokens(state: *State, profile_dir: std.fs.Dir) !void {
             return error.MissingName;
         };
         token.name = try state.ga.dupe(u8, name);
+        token.rid = 0;
 
         try state.tokens.append(state.ga.*, token);
     } else |err| {
         info("Error when reading tokens: {any}", .{err});
         return;
     }
+}
+
+fn appendTokenToFile(token: *Token, profile_dir: std.fs.Dir) !void {
+    const token_file = try profile_dir.createFile("token", .{ .truncate = false });
+    defer token_file.close();
+    try token_file.seekFromEnd(0);
+
+    var buf: [128]u8 = undefined;
+    var token_file_w = token_file.writer(&buf);
+    const writer = &token_file_w.interface;
+    try writer.print("{s} {s}\n", .{ token.id, token.name });
+    try writer.flush();
 }

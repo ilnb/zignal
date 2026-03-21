@@ -19,7 +19,7 @@ pub fn handshakeWithServer(s: *std.net.Stream, profile: []const u8) !std.fs.Dir 
 
     const token_file = profile_dir.openFile("token", .{ .mode = .read_write }) catch |err| switch (err) {
         error.FileNotFound => blk: {
-            break :blk try profile_dir.createFile("token", .{ .truncate = false });
+            break :blk try profile_dir.createFile("token", .{ .truncate = false, .read = true });
         },
         else => return err,
     };
@@ -50,7 +50,7 @@ pub fn handshakeWithServer(s: *std.net.Stream, profile: []const u8) !std.fs.Dir 
     const s_reader = &s_reader_file.interface;
     const msg = try s_reader.takeDelimiter('\n') orelse return error.EndOfStream;
     if (std.mem.eql(u8, "OK", msg)) return profile_dir;
-    std.debug.print("Handshake error: {s}\n", .{msg});
+    std.debug.print("Handshake error: {s}.\n", .{msg});
     return error.HandshakeFailed;
 }
 

@@ -212,21 +212,19 @@ fn displayAll(client: *Client, state: *State) void {
 }
 
 pub fn handleClient(client: *Client, state: *State) void {
-    defer cleanupClient(client, state);
+    // defer cleanupClient(client, state);
+    defer client.online = false;
     const conn = client.conn;
     info("Accepted connection from {f}, {d}", .{ conn.address, client.id });
 
     var read_buf: [1024]u8 = undefined;
-    var reader = conn.stream.reader(&read_buf);
+    var reader_file = conn.stream.reader(&read_buf).file_reader;
+    const reader = &reader_file.interface;
 
     while (true) {
         info("Waiting for data from {d}...", .{client.id});
-        const msg = reader.interface().takeDelimiterInclusive('\n') catch |err| {
+        const msg = reader.takeDelimiter('\n') catch |err| {
             switch (err) {
-                error.EndOfStream => {
-                    info("Connection closed by client {d}", .{client.id});
-                    return;
-                },
                 error.ReadFailed => {
                     info("Failed to read message from {d}", .{client.id});
                     info("Closing...", .{});
@@ -234,6 +232,9 @@ pub fn handleClient(client: *Client, state: *State) void {
                 },
                 else => return,
             }
+        } orelse {
+            info("Connection closed by client {d}", .{client.id});
+            return;
         };
         info("{d} says {s}", .{ client.id, msg });
         parseHeaderAndAct(client, msg, state);
@@ -251,7 +252,7 @@ fn cleanupClient(client: *Client, state: *State) void {
             break;
         }
     } else {
-        info("Client not found in the clients list.\n", .{});
+        info("Client not found in the clients list", .{});
     }
 
     const links = &state.links;
@@ -310,6 +311,10 @@ fn parseHeaderAndAct(client: *Client, msg: []u8, state: *State) void {
             if (t.rid == client.id) break t;
         } else {
             info("Corrupted tokens list. Client with {d} not found.\n", .{client.id});
+            return;
+        };
+        updateTokenFile(name, token, state) catch |err| {
+            info("Failed to update tokens file with error: {any}. Not renaming client {d}", .{ err, client.id });
             return;
         };
         state.ga.free(token.name);
@@ -439,15 +444,21 @@ fn parseHeaderAndAct(client: *Client, msg: []u8, state: *State) void {
     }
 }
 
-pub fn handshakeWithClient(conn: net.Server.Connection, state: *State) !struct { bool, Token } {
+pub const HandshakeResult = union(enum) {
+    new: Token,
+    existing: usize,
+};
+
+pub fn handshakeWithClient(conn: net.Server.Connection, state: *State) !HandshakeResult {
     var buf: [128]u8 = undefined;
     var reader_file = conn.stream.reader(buf[0..64]).file_reader;
     const reader = &reader_file.interface;
     var writer_file = conn.stream.writer(buf[64..]).file_writer;
     const writer = &writer_file.interface;
-    const msg = try reader.takeDelimiter('\n') orelse return error.BadHandshake;
+    const msg = try reader.takeDelimiter('\n') orelse return error.EmptyMessage;
+    info("Recieved handshake message {s} from client {f}", .{ msg, conn.address });
 
-    var itr = std.mem.splitScalar(u8, msg, ' ');
+    var itr = std.mem.splitAny(u8, msg, " \n");
     const new_or_old = itr.next() orelse return error.BadHandshake;
     const token_id = itr.next() orelse return error.BadHandshake;
 
@@ -459,14 +470,32 @@ pub fn handshakeWithClient(conn: net.Server.Connection, state: *State) !struct {
         }
     }
     if (idx != -1) {
-        if (std.mem.eql(u8, new_or_old, "NEW")) return error.KnownToken;
-        try writer.writeAll("OK");
-        try writer.flush();
-        return .{ false, state.tokens.items[@intCast(idx)] };
-    } else {
-        if (std.mem.eql(u8, new_or_old, "OLD")) return error.UnknownToken;
+        if (std.mem.eql(u8, new_or_old, "NEW")) return error.KnownClient;
         try writer.writeAll("OK\n");
         try writer.flush();
-        return .{ true, Token{ .id = try state.ga.dupe(u8, token_id), .name = try state.ga.dupe(u8, "NA"), .rid = 69 } };
+        return .{ .existing = @intCast(idx) };
+    } else {
+        if (std.mem.eql(u8, new_or_old, "OLD")) return error.UnknownClient;
+        try writer.writeAll("OK\n");
+        try writer.flush();
+        return .{ .new = Token{ .id = try state.ga.dupe(u8, token_id), .name = try state.ga.dupe(u8, "NA"), .rid = 0 } };
     }
+}
+
+fn updateTokenFile(name: []const u8, token: *Token, state: *State) !void {
+    const tmp_file = try state.profile_dir.createFile("token.tmp", .{});
+    var buf: [1024]u8 = undefined;
+    var writer_f = tmp_file.writer(&buf);
+    const writer = &writer_f.interface;
+    for (state.tokens.items) |*t| {
+        try writer.print("{s} ", .{t.id});
+        if (token == t) {
+            try writer.print("{s}\n", .{name});
+        } else {
+            @branchHint(.likely);
+            try writer.print("{s}\n", .{t.name});
+        }
+        try writer.flush();
+    }
+    try state.profile_dir.rename("token.tmp", "token");
 }

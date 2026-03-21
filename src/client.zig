@@ -9,8 +9,8 @@ var stream: net.Stream = undefined;
 
 pub fn handleSig(sig: i32) callconv(.c) void {
     _ = sig;
-    running.store(false, .release);
-    stream.close();
+    if (!running.swap(false, .acq_rel)) return;
+    posix.shutdown(stream.handle, .recv) catch {};
     std.fs.File.stdin().close();
 }
 
@@ -85,7 +85,7 @@ pub fn main() !void {
     posix.sigaction(posix.SIG.INT, &sa, null);
 
     var profile_dir = server_mod.handshakeWithServer(&stream, profile) catch |err| {
-        std.debug.print("handshake error: {any}", .{err});
+        std.debug.print("Handshake failed with error {any}.\n", .{err});
         return;
     };
     defer profile_dir.close();
@@ -105,6 +105,8 @@ pub fn main() !void {
         try writer.print("{s}\n", .{msg});
         try writer.flush();
     }
+    try stdout.writeAll("Closing the client\n");
+    try stdout.flush();
 }
 
 fn recvFn(r: *std.Io.Reader, stdout: *std.Io.Writer) void {
@@ -112,7 +114,7 @@ fn recvFn(r: *std.Io.Reader, stdout: *std.Io.Writer) void {
         const line = r.takeDelimiter('\n') catch {
             std.debug.print("Server disconnected\n", .{});
             running.store(false, .release);
-            return;
+            continue;
         };
         const l = line orelse continue;
         stdout.print("{s}\n", .{l}) catch return;
