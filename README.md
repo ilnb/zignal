@@ -41,7 +41,7 @@ Profiles distinguish between multiple server/client instances. A client connects
 - SENDTO - To send message to a specified client of the your links, e.g., SENDTO <id/name> \<msg\>
 - ALL - To broadcast a message to all your links, e.g., ALL \<msg\>
 
-### TODO:
+## TODO:
 - Server side commands
 - Group chats
 - Message history
