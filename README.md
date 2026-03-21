@@ -2,14 +2,33 @@
 
 A simple LAN chatting server written in Zig.
 
-- [x] Basic server setup
-- [x] Basic runtime client identification
-- [x] Server to client communication
-- [x] Client to client communication
-- [ ] Group chats
-- [ ] Message history
-- [ ] Thread Pool
-- [ ] A Front End
+## Features
+- Basic runtime client identification
+- Server to client communication
+- Client to client communication
+- Persistent client identity (token-based)
+- Multi-profile support
+
+## Usage
+
+### Server
+```sh
+zig-out/bin/server [options]
+```
+
+### Client
+```sh
+zig-out/bin/client [options]
+```
+
+### Options
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--port` | `-p` | `8000` | Port to use |
+| `--profile` | `-P` | `default` | Profile to use |
+| `--help` | `-h` | | Display help |
+
+Profiles distinguish between multiple server/client instances. A client connects to the server sharing the same port, and is identified across sessions by its profile's stored token.
 
 ## Client Side commands:
 
@@ -21,3 +40,10 @@ A simple LAN chatting server written in Zig.
 - UNLINK - To disconnect from another client, e.g., UNLINK <id/name>
 - SENDTO - To send message to a specified client of the your links, e.g., SENDTO <id/name> \<msg\>
 - ALL - To broadcast a message to all your links, e.g., ALL \<msg\>
+
+### TODO:
+- Server side commands
+- Group chats
+- Message history
+- Thread Pool
+- A Front End
