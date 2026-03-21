@@ -169,7 +169,7 @@ pub fn main() !void {
                     .active = .empty,
                     .active_mutex = .{},
                 };
-                try appendTokenToFile(token, profile_dir);
+                try appendTokenToFile(token, &state);
                 try state.tokens.append(state.ga.*, token.*);
                 try state.links.put(token.rid, .init(state.ga.*, utils.usizeCmp));
                 try state.clients.append(state.ga.*, client);
@@ -243,8 +243,10 @@ fn populateTokens(state: *State) !void {
     }
 }
 
-fn appendTokenToFile(token: *Token, profile_dir: std.fs.Dir) !void {
-    const token_file = try profile_dir.createFile("token", .{ .truncate = false });
+fn appendTokenToFile(token: *Token, state: *State) !void {
+    state.mutex.lock();
+    defer state.mutex.unlock();
+    const token_file = try state.profile_dir.createFile("token", .{ .truncate = false });
     defer token_file.close();
     try token_file.seekFromEnd(0);
 
