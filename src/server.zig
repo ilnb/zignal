@@ -87,7 +87,7 @@ pub fn main() !void {
 
     const addr = net.Address.initIp4(.{0} ** 4, port);
 
-    var server = try addr.listen(.{ .reuse_address = true });
+    var server = try addr.listen(.{});
     defer server.deinit();
     info("Server listening on port {d}", .{port});
 
