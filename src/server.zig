@@ -111,7 +111,10 @@ pub fn main() !void {
             aa.free(token.id);
             aa.free(token.name);
         }
-        for (clients.items) |c| aa.destroy(c);
+        for (clients.items) |c| {
+            c.active.deinit(aa.*);
+            aa.destroy(c);
+        }
         tokens.deinit(aa.*);
         clients.deinit(aa.*);
         var itr = links.iterator();

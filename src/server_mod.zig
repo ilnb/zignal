@@ -161,17 +161,29 @@ fn sendAll(from: *Client, to_send: []const u8) void {
 }
 
 fn displayClient(client: *Client, to_fetch: *Client, state: *State) void {
+    var id_w: usize, var name_w: usize = .{ 0, "NAME".len };
+    for (state.clients.items) |c| {
+        if (!c.online) continue;
+        id_w = @max(id_w, std.fmt.count("{d}", .{c.id}));
+        name_w = @max(name_w, c.name.len);
+    }
+    id_w += 2;
+    if (name_w == "NAME".len) name_w += 1;
+    name_w += 2;
+
     var write_buf: [1024]u8 = undefined;
     client.writer_mutex.lock();
     defer client.writer_mutex.unlock();
     var writer = client.conn.stream.writer(&write_buf);
     const w = &writer.interface;
-    errWrite(w, "ID\tNAME\tLINK\n", .{}, client) orelse return;
-    errWrite(w, "{d}\t{s}", .{ to_fetch.id, to_fetch.name }, client) orelse return;
-    if (to_fetch.id == client.id) {
-        errWrite(w, "*", .{}, client) orelse return;
-    }
-    errWrite(w, "\t", .{}, client) orelse return;
+    errWrite(w, "{[0]s: <[1]}{[2]s: <[3]}LINK\n", .{ "ID", id_w, "NAME", name_w }, client) orelse return;
+
+    var name_buf: [256]u8 = undefined;
+    const name = if (to_fetch.id == client.id)
+        std.fmt.bufPrint(&name_buf, "{s}*", .{to_fetch.name}) catch to_fetch.name
+    else
+        to_fetch.name;
+    errWrite(w, "{[0]d: <[1]}{[2]s: <[3]}", .{ to_fetch.id, id_w, name, name_w }, client) orelse return;
 
     const conns = state.links.getPtr(to_fetch.id).?;
     var itr = conns.iterator();
@@ -185,19 +197,30 @@ fn displayClient(client: *Client, to_fetch: *Client, state: *State) void {
 }
 
 fn displayAll(client: *Client, state: *State) void {
+    var id_w: usize, var name_w: usize = .{ 0, "NAME".len };
+    for (state.clients.items) |c| {
+        if (!c.online) continue;
+        id_w = @max(id_w, std.fmt.count("{d}", .{c.id}));
+        name_w = @max(name_w, c.name.len);
+    }
+    id_w += 2;
+    if (name_w == "NAME".len) name_w += 1;
+    name_w += 2;
+
     var buf: [1024]u8 = undefined;
     client.writer_mutex.lock();
     defer client.writer_mutex.unlock();
     var writer = client.conn.stream.writer(&buf);
     const w = &writer.interface;
 
-    errWrite(w, "ID\tNAME\tLINK\n", .{}, client) orelse return;
+    errWrite(w, "{[0]s: <[1]}{[2]s: <[3]}LINK\n", .{ "ID", id_w, "NAME", name_w }, client) orelse return;
     for (state.clients.items) |c| {
-        errWrite(w, "{d}\t{s}", .{ c.id, c.name }, client) orelse return;
-        if (c.id == client.id) {
-            errWrite(w, "*", .{}, client) orelse return;
-        }
-        errWrite(w, "\t", .{}, client) orelse return;
+        var name_buf: [256]u8 = undefined;
+        const name = if (c.id == client.id)
+            std.fmt.bufPrint(&name_buf, "{s}*", .{c.name}) catch c.name
+        else
+            c.name;
+        errWrite(w, "{[0]d: <[1]}{[2]s: <[3]}", .{ c.id, id_w, name, name_w }, client) orelse return;
 
         const conns = state.links.getPtr(c.id).?;
         var itr = conns.iterator();
@@ -462,18 +485,17 @@ pub fn handshakeWithClient(conn: net.Server.Connection, state: *State) !Handshak
     const new_or_old = itr.next() orelse return error.BadHandshake;
     const token_id = itr.next() orelse return error.BadHandshake;
 
-    var idx: i32 = -1;
-    for (state.tokens.items, 0..) |t, i| {
+    const idx: ?usize = for (state.tokens.items, 0..) |t, i| {
         if (std.mem.eql(u8, t.id, token_id)) {
-            idx = @intCast(i);
-            break;
+            break @intCast(i);
         }
-    }
-    if (idx != -1) {
+    } else null;
+
+    if (idx != null) {
         if (std.mem.eql(u8, new_or_old, "NEW")) return error.KnownClient;
         try writer.writeAll("OK\n");
         try writer.flush();
-        return .{ .existing = @intCast(idx) };
+        return .{ .existing = idx.? };
     } else {
         if (std.mem.eql(u8, new_or_old, "OLD")) return error.UnknownClient;
         try writer.writeAll("OK\n");
@@ -484,6 +506,7 @@ pub fn handshakeWithClient(conn: net.Server.Connection, state: *State) !Handshak
 
 fn updateTokenFile(name: []const u8, token: *Token, state: *State) !void {
     const tmp_file = try state.profile_dir.createFile("token.tmp", .{});
+    defer tmp_file.close();
     var buf: [1024]u8 = undefined;
     var writer_f = tmp_file.writer(&buf);
     const writer = &writer_f.interface;
