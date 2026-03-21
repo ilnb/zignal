@@ -333,7 +333,7 @@ fn parseHeaderAndAct(client: *Client, msg: []u8, state: *State) void {
         const token: *Token = for (state.tokens.items) |*t| {
             if (t.rid == client.id) break t;
         } else {
-            info("Corrupted tokens list. Client with {d} not found.\n", .{client.id});
+            info("Corrupted tokens list. Client with {d} not found.", .{client.id});
             return;
         };
         updateTokenFile(name, token, state) catch |err| {
@@ -346,7 +346,7 @@ fn parseHeaderAndAct(client: *Client, msg: []u8, state: *State) void {
             return;
         };
         client.name = token.name;
-        info("Named {d} -> {s}\n", .{ client.id, name });
+        info("Named {d} -> {s}", .{ client.id, name });
     } else if (eql(u8, header, "LINK")) {
         const nbuf = while (itr.next()) |s| {
             if (s.len > 0) break s;

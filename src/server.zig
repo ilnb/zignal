@@ -223,13 +223,13 @@ fn populateTokens(state: *State) !void {
         var itr = std.mem.splitScalar(u8, line, ' ');
         var token: Token = undefined;
         const id = itr.next() orelse {
-            info("Corrupted token file\n", .{});
+            info("Corrupted token file", .{});
             return error.MissingId;
         };
         token.id = try state.ga.dupe(u8, id);
 
         const name = itr.next() orelse {
-            info("Corrupted token file\n", .{});
+            info("Corrupted token file", .{});
             state.ga.free(token.id);
             return error.MissingName;
         };
