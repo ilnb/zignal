@@ -3,6 +3,12 @@ const net = std.net;
 const Mutex = std.Thread.Mutex;
 pub const Set = @import("avl").Set;
 
+pub const Token = struct {
+    id: []u8,
+    rid: usize,
+    name: []u8,
+};
+
 pub const Client = struct {
     id: usize,
     conn: net.Server.Connection,
@@ -11,12 +17,16 @@ pub const Client = struct {
     writer_mutex: Mutex,
     active: std.ArrayList(*Client),
     active_mutex: Mutex,
-};
 
-pub const Token = struct {
-    id: []u8,
-    rid: usize,
-    name: []u8,
+    pub fn init(c: *Client, conn: *const std.net.Server.Connection, token: *Token) void {
+        c.id = token.rid;
+        c.conn = conn.*;
+        c.name = token.name;
+        c.online = true;
+        c.writer_mutex = .{};
+        c.active = .empty;
+        c.active_mutex = .{};
+    }
 };
 
 pub const State = struct {
@@ -25,5 +35,5 @@ pub const State = struct {
     mutex: Mutex,
     profile_dir: std.fs.Dir,
     tokens: std.ArrayList(Token),
-    ga: *const std.mem.Allocator,
+    ga: std.mem.Allocator,
 };

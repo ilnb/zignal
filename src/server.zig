@@ -97,7 +97,7 @@ pub fn main() !void {
     var state = State{
         .clients = .empty,
         .links = std.AutoHashMap(usize, Set(usize)).init(ga),
-        .ga = &ga,
+        .ga = ga,
         .mutex = .{},
         .tokens = .empty,
         .profile_dir = profile_dir,
@@ -112,11 +112,11 @@ pub fn main() !void {
             aa.free(token.name);
         }
         for (clients.items) |c| {
-            c.active.deinit(aa.*);
+            c.active.deinit(ga);
             aa.destroy(c);
         }
-        tokens.deinit(aa.*);
-        clients.deinit(aa.*);
+        tokens.deinit(ga);
+        clients.deinit(ga);
         var itr = links.iterator();
         while (itr.next()) |e| e.value_ptr.deinit();
         links.deinit();
@@ -160,19 +160,11 @@ pub fn main() !void {
                 token.rid = id;
                 id += 1;
                 client = try ga.create(Client);
-                client.* = Client{
-                    .id = token.rid,
-                    .conn = conn,
-                    .name = token.name,
-                    .online = true,
-                    .writer_mutex = .{},
-                    .active = .empty,
-                    .active_mutex = .{},
-                };
+                client.init(&conn, token);
                 try appendTokenToFile(token, &state);
-                try state.tokens.append(state.ga.*, token.*);
-                try state.links.put(token.rid, .init(state.ga.*, utils.usizeCmp));
-                try state.clients.append(state.ga.*, client);
+                try state.tokens.append(state.ga, token.*);
+                try state.links.put(token.rid, .init(state.ga, utils.usizeCmp));
+                try state.clients.append(state.ga, client);
             },
             .existing => |idx| {
                 const token = &state.tokens.items[idx];
@@ -189,17 +181,9 @@ pub fn main() !void {
                     client.online = true;
                 } else {
                     client = try ga.create(Client);
-                    client.* = Client{
-                        .id = token.rid,
-                        .conn = conn,
-                        .name = token.name,
-                        .online = true,
-                        .writer_mutex = .{},
-                        .active = .empty,
-                        .active_mutex = .{},
-                    };
-                    try state.clients.append(state.ga.*, client);
-                    try state.links.put(token.rid, .init(state.ga.*, utils.usizeCmp));
+                    client.init(&conn, token);
+                    try state.clients.append(state.ga, client);
+                    try state.links.put(token.rid, .init(state.ga, utils.usizeCmp));
                 }
             },
         }
@@ -236,7 +220,7 @@ fn populateTokens(state: *State) !void {
         token.name = try state.ga.dupe(u8, name);
         token.rid = 0;
 
-        try state.tokens.append(state.ga.*, token);
+        try state.tokens.append(state.ga, token);
     } else |err| {
         info("Error when reading tokens: {any}", .{err});
         return;

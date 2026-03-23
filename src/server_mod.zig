@@ -40,14 +40,14 @@ fn linkClients(client1: *Client, client2: *Client, state: *State) void {
 
     client1.active_mutex.lock();
     defer client1.active_mutex.unlock();
-    client1.active.append(state.ga.*, client2) catch |err| {
+    client1.active.append(state.ga, client2) catch |err| {
         info("Error appending active {any}", .{err});
         return;
     };
 
     client2.active_mutex.lock();
     defer client2.active_mutex.unlock();
-    client2.active.append(state.ga.*, client1) catch |err| {
+    client2.active.append(state.ga, client1) catch |err| {
         info("Error appending active {any}", .{err});
         return;
     };
