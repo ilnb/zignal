@@ -96,9 +96,17 @@ fn unlinkClients(client1: *Client, client2: *Client, state: *State) void {
 }
 
 fn sendMsg(from: *Client, to: *Client, to_send: []const u8) void {
-    if (from == to) return;
-
     var buf: [1024]u8 = undefined;
+
+    if (from == to) {
+        from.writer_mutex.lock();
+        defer from.writer_mutex.unlock();
+        var writer = from.conn.stream.writer(&buf);
+        const w = &writer.interface;
+        errWrite(w, "Self message.\n", .{}, from) orelse return;
+        errFlush(w, from) orelse return;
+        return;
+    }
 
     if (to_send.len == 0) {
         from.writer_mutex.lock();
