@@ -99,6 +99,17 @@ fn sendMsg(from: *Client, to: *Client, to_send: []const u8) void {
     if (from == to) return;
 
     var buf: [1024]u8 = undefined;
+
+    if (to_send.len == 0) {
+        from.writer_mutex.lock();
+        defer from.writer_mutex.unlock();
+        var writer = from.conn.stream.writer(&buf);
+        const w = &writer.interface;
+        errWrite(w, "Empty message.\n", .{}, from) orelse return;
+        errFlush(w, from) orelse return;
+        return;
+    }
+
     from.active_mutex.lock();
     defer from.active_mutex.unlock();
     _ = for (from.active.items) |c| {
@@ -127,21 +138,11 @@ fn sendMsg(from: *Client, to: *Client, to_send: []const u8) void {
         return;
     };
 
-    if (to_send.len == 0) {
-        from.writer_mutex.lock();
-        defer from.writer_mutex.unlock();
-        var writer = from.conn.stream.writer(&buf);
-        const w = &writer.interface;
-        errWrite(w, "Empty message.\n", .{}, from) orelse return;
-        errFlush(w, from) orelse return;
-        return;
-    }
-
     to.writer_mutex.lock();
     defer to.writer_mutex.unlock();
     var writer = to.conn.stream.writer(&buf);
     const w = &writer.interface;
-    errWrite(w, "({s}, {d}): {s}", .{ from.name, from.id, to_send }, to) orelse return;
+    errWrite(w, "({s}, {d}): {s}\n", .{ from.name, from.id, to_send }, to) orelse return;
     errFlush(w, to) orelse return;
 }
 
@@ -155,7 +156,7 @@ fn sendAll(from: *Client, to_send: []const u8) void {
         defer c.writer_mutex.unlock();
         var writer = c.conn.stream.writer(&buf);
         const w = &writer.interface;
-        errWrite(w, "({s}, {d}): {s}", .{ from.name, from.id, to_send }, c) orelse return;
+        errWrite(w, "({s}, {d}): {s}\n", .{ from.name, from.id, to_send }, c) orelse return;
         errFlush(w, c) orelse return;
     }
 }
@@ -251,15 +252,17 @@ pub fn handleClient(client: *Client, state: *State) void {
                 error.ReadFailed => {
                     info("Failed to read message from {d}", .{client.id});
                     info("Closing...", .{});
-                    return;
                 },
-                else => return,
+                else => {
+                    info("Message buffer overflowed", .{});
+                },
             }
+            break;
         } orelse {
             info("Connection closed by client {d}", .{client.id});
-            return;
+            break;
         };
-        const trimmed = std.mem.trim(u8, msg, " \n");
+        const trimmed = std.mem.trim(u8, msg, " ");
         if (trimmed.len == 0) continue;
         info("{d} says {s}", .{ client.id, trimmed });
         parseHeaderAndAct(client, trimmed, state);
@@ -328,6 +331,19 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) void {
             errFlush(w, client) orelse return;
             return;
         };
+        var num_count: usize = 0;
+        for (name) |c| {
+            if (c >= 0 and c <= 9) num_count += 1;
+        }
+        if (num_count == name.len) {
+            client.writer_mutex.lock();
+            defer client.writer_mutex.unlock();
+            var writer = client.conn.stream.writer(&write_buf);
+            const w = &writer.interface;
+            errWrite(w, "All numeric name is not allowed\n", .{}, client) orelse return;
+            errFlush(w, client) orelse return;
+            return;
+        }
         const token: *Token = for (state.tokens.items) |*t| {
             if (t.rid == client.id) break t;
         } else {
@@ -355,18 +371,12 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) void {
             errFlush(w, client) orelse return;
             return;
         };
-        var c2 = getClientById(buf, state);
-        if (c2 != null) {
-            linkClients(client, c2.?, state);
+        const c2 = getClientById(buf, state) orelse getClientByName(buf, state) orelse {
+            errWrite(w, "Failed to connect to {s}. Invalid id or name\n", .{buf}, client) orelse return;
+            errFlush(w, client) orelse return;
             return;
-        }
-        c2 = getClientByName(buf, state);
-        if (c2 != null) {
-            linkClients(client, c2.?, state);
-            return;
-        }
-        errWrite(w, "Failed to connect to {s}. Invalid id or name\n", .{buf}, client) orelse return;
-        errFlush(w, client) orelse return;
+        };
+        linkClients(client, c2, state);
     } else if (eql(u8, header, "UNLINK")) {
         client.writer_mutex.lock();
         defer client.writer_mutex.unlock();
@@ -377,65 +387,48 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) void {
             errFlush(w, client) orelse return;
             return;
         };
-        var c2 = getClientById(buf, state);
-        if (c2 != null) {
-            unlinkClients(client, c2.?, state);
+        const c2 = getClientById(buf, state) orelse getClientByName(buf, state) orelse {
+            errWrite(w, "Failed to unlink from {s}. Invalid id or name\n", .{buf}, client) orelse return;
+            errFlush(w, client) orelse return;
             return;
-        }
-        c2 = getClientByName(buf, state);
-        if (c2 != null) {
-            unlinkClients(client, c2.?, state);
-            return;
-        }
-        errWrite(w, "Failed to unlink from {s}. Invalid id or name\n", .{buf}, client) orelse return;
-        errFlush(w, client) orelse return;
+        };
+        unlinkClients(client, c2, state);
     } else if (eql(u8, header, "SENDTO")) {
-        client.writer_mutex.lock();
-        defer client.writer_mutex.unlock();
         var writer = client.conn.stream.writer(&write_buf);
         const w = &writer.interface;
         const buf = itr.next() orelse {
+            client.writer_mutex.lock();
+            defer client.writer_mutex.unlock();
             errWrite(w, "No id or name specified\n", .{}, client) orelse return;
             errFlush(w, client) orelse return;
             return;
         };
-        const to_send = itr.rest();
-        var c2 = getClientById(buf, state);
-        if (c2 != null) {
-            sendMsg(client, c2.?, to_send);
+        const to_send = std.mem.trim(u8, itr.rest(), " \n");
+        const c2 = getClientById(buf, state) orelse getClientByName(buf, state) orelse {
+            client.writer_mutex.lock();
+            defer client.writer_mutex.unlock();
+            errWrite(w, "Failed to send message to {s}. Invalid id or name\n", .{buf}, client) orelse return;
+            errFlush(w, client) orelse return;
             return;
-        }
-        c2 = getClientByName(buf, state);
-        if (c2 != null) {
-            sendMsg(client, c2.?, to_send);
-            return;
-        }
-        errWrite(w, "Failed to connect to {s}. Invalid id or name\n", .{buf}, client) orelse return;
-        errFlush(w, client) orelse return;
+        };
+        sendMsg(client, c2, to_send);
     } else if (eql(u8, header, "ALL")) {
         sendAll(client, std.mem.trim(u8, itr.rest(), " \n"));
     } else if (eql(u8, header, "GETINFO")) {
-        const buf = itr.next();
-        if (buf != null) {
-            var to_fetch = getClientById(buf.?, state);
-            if (to_fetch != null) {
-                displayClient(client, to_fetch.?, state);
-                return;
-            }
-            to_fetch = getClientByName(buf.?, state);
-            if (to_fetch != null) {
-                displayClient(client, to_fetch.?, state);
-                return;
-            }
+        const buf = itr.next() orelse {
+            displayAll(client, state);
+            return;
+        };
+        const to_fetch = getClientById(buf, state) orelse getClientByName(buf, state) orelse {
             client.writer_mutex.lock();
             defer client.writer_mutex.unlock();
             var writer = client.conn.stream.writer(&write_buf);
             const w = &writer.interface;
-            errWrite(w, "Failed to getinfo of {s}. Invalid id or name\n", .{buf.?}, client) orelse return;
+            errWrite(w, "Failed to getinfo of {s}. Invalid id or name\n", .{buf}, client) orelse return;
             errFlush(w, client) orelse return;
-        } else {
-            displayAll(client, state);
-        }
+            return;
+        };
+        displayClient(client, to_fetch, state);
     }
 }
 
