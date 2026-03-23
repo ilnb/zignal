@@ -167,7 +167,7 @@ pub fn main() !void {
                 try state.clients.append(state.ga, client);
             },
             .existing => |idx| {
-                const token = &state.tokens.items[idx];
+                const token: *Token = @ptrCast(&state.tokens.items[idx]);
                 if (token.rid == 0) {
                     token.rid = id;
                     id += 1;
