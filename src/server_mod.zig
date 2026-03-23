@@ -298,7 +298,7 @@ fn parseHeaderAndAct(client: *Client, msg: []u8, state: *State) void {
     state.mutex.lock();
     defer state.mutex.unlock();
 
-    var itr = std.mem.splitAny(u8, msg, " \n");
+    var itr = std.mem.tokenizeAny(u8, msg, " \n");
     var write_buf: [1024]u8 = undefined;
     const header = itr.next() orelse return;
     if (eql(u8, header, "ECHO")) {
@@ -481,7 +481,7 @@ pub fn handshakeWithClient(conn: net.Server.Connection, state: *State) !Handshak
     const msg = try reader.takeDelimiter('\n') orelse return error.EmptyMessage;
     info("Recieved handshake message {s} from client {f}", .{ msg, conn.address });
 
-    var itr = std.mem.splitAny(u8, msg, " \n");
+    var itr = std.mem.tokenizeAny(u8, msg, " \n");
     const new_or_old = itr.next() orelse return error.BadHandshake;
     const token_id = itr.next() orelse return error.BadHandshake;
 

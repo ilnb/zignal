@@ -220,7 +220,7 @@ fn populateTokens(state: *State) !void {
         if (nline == null) break;
         const line = nline.?;
 
-        var itr = std.mem.splitScalar(u8, line, ' ');
+        var itr = std.mem.tokenizeScalar(u8, line, ' ');
         var token: Token = undefined;
         const id = itr.next() orelse {
             info("Corrupted token file", .{});
