@@ -91,7 +91,7 @@ pub fn main() !void {
     defer server.deinit();
     info("Server listening on port {d}", .{port});
 
-    const timeout = posix.timeval{ .sec = 1, .usec = 0 };
+    const timeout = posix.timeval{ .sec = 0, .usec = 500000 };
     try posix.setsockopt(server.stream.handle, posix.SOL.SOCKET, posix.SO.RCVTIMEO, &std.mem.toBytes(timeout));
 
     var state = State{
