@@ -87,7 +87,7 @@ pub fn main() !void {
 
     const addr = net.Address.initIp4(.{0} ** 4, port);
 
-    var server = try addr.listen(.{});
+    var server = try addr.listen(.{ .reuse_address = true });
     defer server.deinit();
     info("Server listening on port {d}", .{port});
 
@@ -131,7 +131,7 @@ pub fn main() !void {
     };
     posix.sigaction(posix.SIG.INT, &sa, null);
 
-    var id: usize = 1;
+    var id: usize = 0;
     while (running.load(.acquire)) {
         const conn = server.accept() catch |err| switch (err) {
             error.WouldBlock => continue,
@@ -161,19 +161,18 @@ pub fn main() !void {
                 id += 1;
                 client = try ga.create(Client);
                 client.init(&conn, token);
-                try appendTokenToFile(token, &state);
                 try state.tokens.append(state.ga, token.*);
-                try state.links.put(token.rid, .init(state.ga, utils.usizeCmp));
+                try state.links.put(token.rid.?, .init(state.ga, utils.usizeCmp));
                 try state.clients.append(state.ga, client);
             },
             .existing => |idx| {
                 const token: *Token = @ptrCast(&state.tokens.items[idx]);
-                if (token.rid == 0) {
+                if (token.rid == null) {
                     token.rid = id;
                     id += 1;
                 }
                 const client_idx: usize = for (state.clients.items, 0..) |c, i| {
-                    if (c.id == token.rid) break i;
+                    if (c.id == token.rid.?) break i;
                 } else std.math.maxInt(usize);
                 if (client_idx != std.math.maxInt(usize)) {
                     client = state.clients.items[client_idx];
@@ -183,13 +182,14 @@ pub fn main() !void {
                     client = try ga.create(Client);
                     client.init(&conn, token);
                     try state.clients.append(state.ga, client);
-                    try state.links.put(token.rid, .init(state.ga, utils.usizeCmp));
+                    try state.links.put(token.rid.?, .init(state.ga, utils.usizeCmp));
                 }
             },
         }
 
         _ = try std.Thread.spawn(.{}, client_mod.handleClient, .{ client, &state });
     }
+    try updateTokensFile(&state);
     info("Closing the server", .{});
 }
 
@@ -200,43 +200,42 @@ fn populateTokens(state: *State) !void {
     var token_file_r = token_file.reader(&buf);
     const reader = &token_file_r.interface;
 
-    while (reader.takeDelimiter('\n')) |nline| {
-        if (nline == null) break;
-        const line = nline.?;
-
-        var itr = std.mem.tokenizeScalar(u8, line, ' ');
-        var token: Token = undefined;
-        const id = itr.next() orelse {
-            info("Corrupted token file", .{});
-            return error.MissingId;
-        };
-        token.id = try state.ga.dupe(u8, id);
-
-        const name = itr.next() orelse {
-            info("Corrupted token file", .{});
-            state.ga.free(token.id);
-            return error.MissingName;
-        };
-        token.name = try state.ga.dupe(u8, name);
-        token.rid = 0;
-
-        try state.tokens.append(state.ga, token);
-    } else |err| {
-        info("Error when reading tokens: {any}", .{err});
+    const file_size = (try token_file.stat()).size;
+    if (file_size == 0) {
+        info("Empty tokens file", .{});
         return;
+    }
+    const json_str = try reader.readAlloc(state.ga, file_size);
+    defer state.ga.free(json_str);
+
+    const parsed: std.json.Parsed([]Token) = try std.json.parseFromSlice([]Token, state.ga, json_str, .{});
+    defer parsed.deinit();
+
+    for (parsed.value) |*t| {
+        try state.tokens.append(state.ga, .{
+            .id = try state.ga.dupe(u8, t.id),
+            .name = try state.ga.dupe(u8, t.name),
+        });
     }
 }
 
-fn appendTokenToFile(token: *Token, state: *State) !void {
-    state.mutex.lock();
-    defer state.mutex.unlock();
-    const token_file = try state.profile_dir.createFile("token", .{ .truncate = false });
-    defer token_file.close();
-    try token_file.seekFromEnd(0);
+fn updateTokensFile(state: *State) !void {
+    const tmp_file = try state.profile_dir.createFile("token.tmp", .{});
+    defer tmp_file.close();
+    var buf: [1024]u8 = undefined;
+    var writer_f = tmp_file.writer(&buf);
+    const writer = &writer_f.interface;
+    const tokens = state.tokens.items;
 
-    var buf: [128]u8 = undefined;
-    var token_file_w = token_file.writer(&buf);
-    const writer = &token_file_w.interface;
-    try writer.print("{s} {s}\n", .{ token.id, token.name });
+    const TokenFile = struct { id: []u8, name: []u8 };
+    const tmp = try state.ga.alloc(TokenFile, tokens.len);
+    defer state.ga.free(tmp);
+
+    for (tokens, 0..) |*t, i| {
+        tmp[i] = .{ .id = t.id, .name = t.name };
+    }
+    try std.json.Stringify.value(tmp, .{ .whitespace = .indent_2 }, writer);
+    try writer.writeAll("\n");
     try writer.flush();
+    try state.profile_dir.rename("token.tmp", "jtoken");
 }

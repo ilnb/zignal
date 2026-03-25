@@ -5,7 +5,7 @@ pub const Set = @import("avl").Set;
 
 pub const Token = struct {
     id: []u8,
-    rid: usize,
+    rid: ?usize = null,
     name: []u8,
 };
 
@@ -18,8 +18,8 @@ pub const Client = struct {
     active: std.ArrayList(*Client),
     active_mutex: Mutex,
 
-    pub fn init(c: *Client, conn: *const std.net.Server.Connection, token: *Token) void {
-        c.id = token.rid;
+    pub fn init(c: *Client, conn: *const net.Server.Connection, token: *Token) void {
+        c.id = token.rid.?;
         c.conn = conn.*;
         c.name = token.name;
         c.online = true;

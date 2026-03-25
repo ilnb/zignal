@@ -341,7 +341,7 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) void {
         };
         var num_count: usize = 0;
         for (name) |c| {
-            if (c >= 0 and c <= 9) num_count += 1;
+            if (c >= '0' and c <= '9') num_count += 1;
         }
         if (num_count == name.len) {
             client.writer_mutex.lock();
@@ -353,13 +353,9 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) void {
             return;
         }
         const token: *Token = for (state.tokens.items) |*t| {
-            if (t.rid == client.id) break t;
+            if (t.rid) |rid| if (rid == client.id) break t;
         } else {
             info("Corrupted tokens list. Client with {d} not found.", .{client.id});
-            return;
-        };
-        updateTokenFile(name, token, state) catch |err| {
-            info("Failed to update tokens file with error: {any}. Not renaming client {d}", .{ err, client.id });
             return;
         };
         state.ga.free(token.name);
@@ -473,25 +469,6 @@ pub fn handshakeWithClient(conn: net.Server.Connection, state: *State) !Handshak
         if (std.mem.eql(u8, new_or_old, "OLD")) return error.UnknownClient;
         try writer.writeAll("OK\n");
         try writer.flush();
-        return .{ .new = Token{ .id = try state.ga.dupe(u8, token_id), .name = try state.ga.dupe(u8, "NA"), .rid = 0 } };
+        return .{ .new = Token{ .id = try state.ga.dupe(u8, token_id), .name = try state.ga.dupe(u8, "NA") } };
     }
-}
-
-fn updateTokenFile(name: []const u8, token: *Token, state: *State) !void {
-    const tmp_file = try state.profile_dir.createFile("token.tmp", .{});
-    defer tmp_file.close();
-    var buf: [1024]u8 = undefined;
-    var writer_f = tmp_file.writer(&buf);
-    const writer = &writer_f.interface;
-    for (state.tokens.items) |*t| {
-        try writer.print("{s} ", .{t.id});
-        if (token == t) {
-            try writer.print("{s}\n", .{name});
-        } else {
-            @branchHint(.likely);
-            try writer.print("{s}\n", .{t.name});
-        }
-        try writer.flush();
-    }
-    try state.profile_dir.rename("token.tmp", "token");
 }
