@@ -13,14 +13,14 @@ pub fn usizeCmp(a: usize, b: usize) std.math.Order {
 
 pub fn errWrite(w: *Writer, comptime fmt: []const u8, args: anytype, client: *Client) ?void {
     w.print(fmt, args) catch |err| {
-        info("Write failed to {d}: {any}", .{ client.id, err });
+        info("Write failed to {d}: {any}", .{ client.rid, err });
         return null;
     };
 }
 
 pub fn errFlush(w: *Writer, client: *Client) ?void {
     w.flush() catch |err| {
-        info("Flush failed to {d}: {any}", .{ client.id, err });
+        info("Flush failed to {d}: {any}", .{ client.rid, err });
         return null;
     };
 }
@@ -28,7 +28,7 @@ pub fn errFlush(w: *Writer, client: *Client) ?void {
 pub fn getClientById(buf: []const u8, state: *State) ?*Client {
     const id = std.fmt.parseInt(u8, buf, 10) catch return null;
     return for (state.clients.items) |c| {
-        if (c.id == id) break c;
+        if (c.rid == id) break c;
     } else return null;
 }
 

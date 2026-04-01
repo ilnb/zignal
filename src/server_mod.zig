@@ -15,8 +15,8 @@ const getClientByName = utils.getClientByName;
 
 fn linkClients(client1: *Client, client2: *Client, state: *State) void {
     if (client1 == client2) return;
-    const id1 = client1.id;
-    const id2 = client2.id;
+    const id1 = client1.rid;
+    const id2 = client2.rid;
     const links = &state.links;
 
     const f = links.getPtr(id1) orelse {
@@ -57,8 +57,8 @@ fn linkClients(client1: *Client, client2: *Client, state: *State) void {
 
 fn unlinkClients(client1: *Client, client2: *Client, state: *State) void {
     if (client1 == client2) return;
-    const id1 = client1.id;
-    const id2 = client2.id;
+    const id1 = client1.rid;
+    const id2 = client2.rid;
     const links = &state.links;
 
     const f = links.getPtr(id1) orelse {
@@ -150,7 +150,7 @@ fn sendMsg(from: *Client, to: *Client, to_send: []const u8) void {
     defer to.writer_mutex.unlock();
     var writer = to.conn.stream.writer(&buf);
     const w = &writer.interface;
-    errWrite(w, "({s}, {d}): {s}\n", .{ from.name, from.id, to_send }, to) orelse return;
+    errWrite(w, "({s}, {d}): {s}\n", .{ from.name, from.rid, to_send }, to) orelse return;
     errFlush(w, to) orelse return;
 }
 
@@ -164,7 +164,7 @@ fn sendAll(from: *Client, to_send: []const u8) void {
         defer c.writer_mutex.unlock();
         var writer = c.conn.stream.writer(&buf);
         const w = &writer.interface;
-        errWrite(w, "({s}, {d}): {s}\n", .{ from.name, from.id, to_send }, c) orelse return;
+        errWrite(w, "({s}, {d}): {s}\n", .{ from.name, from.rid, to_send }, c) orelse return;
         errFlush(w, c) orelse return;
     }
 }
@@ -173,7 +173,7 @@ fn displayClient(client: *Client, to_fetch: *Client, state: *State) void {
     var id_w: usize, var name_w: usize = .{ 0, "NAME".len };
     for (state.clients.items) |c| {
         if (!c.online) continue;
-        id_w = @max(id_w, std.fmt.count("{d}", .{c.id}));
+        id_w = @max(id_w, std.fmt.count("{d}", .{c.rid}));
         name_w = @max(name_w, c.name.len);
     }
     id_w += 2;
@@ -185,16 +185,16 @@ fn displayClient(client: *Client, to_fetch: *Client, state: *State) void {
     defer client.writer_mutex.unlock();
     var writer = client.conn.stream.writer(&write_buf);
     const w = &writer.interface;
-    errWrite(w, "{[0]s: <[1]}{[2]s: <[3]}LINK\n", .{ "ID", id_w, "NAME", name_w }, client) orelse return;
+    errWrite(w, "{s: <[2]}{s: <[3]}LINK\n", .{ "ID", "NAME", id_w, name_w }, client) orelse return;
 
     var name_buf: [256]u8 = undefined;
-    const name = if (to_fetch.id == client.id)
+    const name = if (to_fetch.rid == client.rid)
         std.fmt.bufPrint(&name_buf, "{s}*", .{to_fetch.name}) catch to_fetch.name
     else
         to_fetch.name;
-    errWrite(w, "{[0]d: <[1]}{[2]s: <[3]}", .{ to_fetch.id, id_w, name, name_w }, client) orelse return;
+    errWrite(w, "{d: <[2]}{s: <[3]}", .{ to_fetch.rid, name, id_w, name_w }, client) orelse return;
 
-    const conns = state.links.getPtr(to_fetch.id).?;
+    const conns = state.links.getPtr(to_fetch.rid).?;
     var itr = conns.iterator();
     var i: usize = 1;
     while (itr.next()) |node| {
@@ -209,7 +209,7 @@ fn displayAll(client: *Client, state: *State) void {
     var id_w: usize, var name_w: usize = .{ 0, "NAME".len };
     for (state.clients.items) |c| {
         if (!c.online) continue;
-        id_w = @max(id_w, std.fmt.count("{d}", .{c.id}));
+        id_w = @max(id_w, std.fmt.count("{d}", .{c.rid}));
         name_w = @max(name_w, c.name.len);
     }
     id_w += 2;
@@ -222,16 +222,16 @@ fn displayAll(client: *Client, state: *State) void {
     var writer = client.conn.stream.writer(&buf);
     const w = &writer.interface;
 
-    errWrite(w, "{[0]s: <[1]}{[2]s: <[3]}LINK\n", .{ "ID", id_w, "NAME", name_w }, client) orelse return;
+    errWrite(w, "{s: <[2]}{s: <[3]}LINK\n", .{ "ID", "NAME", id_w, name_w }, client) orelse return;
     for (state.clients.items) |c| {
         var name_buf: [256]u8 = undefined;
-        const name = if (c.id == client.id)
+        const name = if (c.rid == client.rid)
             std.fmt.bufPrint(&name_buf, "{s}*", .{c.name}) catch c.name
         else
             c.name;
-        errWrite(w, "{[0]d: <[1]}{[2]s: <[3]}", .{ c.id, id_w, name, name_w }, client) orelse return;
+        errWrite(w, "{d: <[2]}{s: <[3]}", .{ c.rid, name, id_w, name_w }, client) orelse return;
 
-        const conns = state.links.getPtr(c.id).?;
+        const conns = state.links.getPtr(c.rid).?;
         var itr = conns.iterator();
         var i: usize = 1;
         while (itr.next()) |node| {
@@ -247,18 +247,18 @@ pub fn handleClient(client: *Client, state: *State) void {
     // defer cleanupClient(client, state);
     defer client.online = false;
     const conn = client.conn;
-    info("Accepted connection from {f}, {d}", .{ conn.address, client.id });
+    info("Accepted connection from {f}, {d}", .{ conn.address, client.rid });
 
     var read_buf: [1024]u8 = undefined;
     var reader_file = conn.stream.reader(&read_buf).file_reader;
     const reader = &reader_file.interface;
 
     while (true) {
-        info("Waiting for data from {d}...", .{client.id});
+        info("Waiting for data from {d}...", .{client.rid});
         const msg = reader.takeDelimiter('\n') catch |err| {
             switch (err) {
                 error.ReadFailed => {
-                    info("Failed to read message from {d}", .{client.id});
+                    info("Failed to read message from {d}", .{client.rid});
                     info("Closing...", .{});
                 },
                 else => {
@@ -267,18 +267,18 @@ pub fn handleClient(client: *Client, state: *State) void {
             }
             break;
         } orelse {
-            info("Connection closed by client {d}", .{client.id});
+            info("Connection closed by client {d}", .{client.rid});
             break;
         };
         const trimmed = std.mem.trim(u8, msg, " ");
         if (trimmed.len == 0) continue;
-        info("{d} says {s}", .{ client.id, trimmed });
+        info("{d} says {s}", .{ client.rid, trimmed });
         parseHeaderAndAct(client, trimmed, state);
     }
 }
 
 fn cleanupClient(client: *Client, state: *State) void {
-    const id = client.id;
+    const id = client.rid;
     state.mutex.lock();
     defer state.mutex.unlock();
     const clients = &state.clients;
@@ -293,11 +293,11 @@ fn cleanupClient(client: *Client, state: *State) void {
 
     const links = &state.links;
     for (clients.items) |c| {
-        if (c.id != client.id) links.getPtr(c.id).?.remove(id);
+        if (c.rid != client.rid) links.getPtr(c.rid).?.remove(id);
         c.active_mutex.lock();
         defer c.active_mutex.unlock();
         for (c.active.items, 0..) |c_, i| {
-            if (c_.id == id) {
+            if (c_.rid == id) {
                 _ = c.active.swapRemove(i);
                 break;
             }
@@ -327,7 +327,7 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) void {
         defer client.writer_mutex.unlock();
         var writer = client.conn.stream.writer(&write_buf);
         const w = &writer.interface;
-        errWrite(w, "name: {s}, id: {d}\n", .{ client.name, client.id }, client) orelse return;
+        errWrite(w, "name: {s}, id: {d}\n", .{ client.name, client.rid }, client) orelse return;
         errFlush(w, client) orelse return;
     } else if (eql(u8, header, "NAME")) {
         const name = itr.next() orelse {
@@ -353,18 +353,18 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) void {
             return;
         }
         const token: *Token = for (state.tokens.items) |*t| {
-            if (t.rid) |rid| if (rid == client.id) break t;
+            if (t.rid) |rid| if (rid == client.rid) break t;
         } else {
-            info("Corrupted tokens list. Client with {d} not found.", .{client.id});
+            info("Corrupted tokens list. Client with {d} not found.", .{client.rid});
             return;
         };
         state.ga.free(token.name);
         token.name = state.ga.dupe(u8, name) catch |err| {
-            info("Failed to set name for {d}: {any}", .{ client.id, err });
+            info("Failed to set name for {d}: {any}", .{ client.rid, err });
             return;
         };
         client.name = token.name;
-        info("Named {d} -> {s}", .{ client.id, name });
+        info("Named {d} -> {s}", .{ client.rid, name });
     } else if (eql(u8, header, "LINK")) {
         client.writer_mutex.lock();
         defer client.writer_mutex.unlock();

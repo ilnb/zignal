@@ -172,7 +172,7 @@ pub fn main() !void {
                     id += 1;
                 }
                 const client_idx: usize = for (state.clients.items, 0..) |c, i| {
-                    if (c.id == token.rid.?) break i;
+                    if (c.rid == token.rid.?) break i;
                 } else std.math.maxInt(usize);
                 if (client_idx != std.math.maxInt(usize)) {
                     client = state.clients.items[client_idx];

@@ -10,7 +10,7 @@ pub const Token = struct {
 };
 
 pub const Client = struct {
-    id: usize,
+    rid: usize,
     conn: net.Server.Connection,
     name: []u8,
     online: bool,
@@ -19,7 +19,7 @@ pub const Client = struct {
     active_mutex: Mutex,
 
     pub fn init(c: *Client, conn: *const net.Server.Connection, token: *Token) void {
-        c.id = token.rid.?;
+        c.rid = token.rid.?;
         c.conn = conn.*;
         c.name = token.name;
         c.online = true;
