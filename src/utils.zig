@@ -18,6 +18,13 @@ pub fn errWrite(w: *Writer, comptime fmt: []const u8, args: anytype, client: *Cl
     };
 }
 
+pub fn errWriteAll(w: *Writer, msg: []const u8, client: *Client) ?void {
+    w.writeAll(msg) catch |err| {
+        info("Write failed to {d}: {any}", .{ client.rid, err });
+        return null;
+    };
+}
+
 pub fn errFlush(w: *Writer, client: *Client) ?void {
     w.flush() catch |err| {
         info("Flush failed to {d}: {any}", .{ client.rid, err });
