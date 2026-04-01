@@ -14,6 +14,169 @@ const errFlush = utils.errFlush;
 const getClientById = utils.getClientById;
 const getClientByName = utils.getClientByName;
 
+pub fn handleClient(client: *Client, state: *State) void {
+    defer cleanupClient(client, state);
+    defer client.online = false;
+    const conn = client.conn;
+    info("Accepted connection from {f}, {d}", .{ conn.address, client.rid });
+
+    var read_buf: [1024]u8 = undefined;
+    var reader_file = conn.stream.reader(&read_buf).file_reader;
+    const reader = &reader_file.interface;
+
+    while (true) {
+        info("Waiting for data from {d}...", .{client.rid});
+        const msg = reader.takeDelimiter('\n') catch |err| {
+            switch (err) {
+                error.ReadFailed => {
+                    info("Failed to read message from {d}", .{client.rid});
+                    info("Closing...", .{});
+                },
+                else => {
+                    info("Message buffer overflowed", .{});
+                },
+            }
+            break;
+        } orelse {
+            info("Connection closed by client {d}", .{client.rid});
+            break;
+        };
+        const trimmed = std.mem.trim(u8, msg, " ");
+        if (trimmed.len == 0) continue;
+        info("{d} says {s}", .{ client.rid, trimmed });
+        parseHeaderAndAct(client, trimmed, state);
+    }
+}
+
+fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) void {
+    state.mutex.lock();
+    defer state.mutex.unlock();
+
+    var itr = std.mem.tokenizeScalar(u8, msg, ' ');
+    var write_buf: [1024]u8 = undefined;
+    const header = itr.next() orelse return;
+    if (eql(u8, header, "ECHO")) {
+        const to_echo = itr.rest();
+        client.writer_mutex.lock();
+        defer client.writer_mutex.unlock();
+        var writer = client.conn.stream.writer(&write_buf);
+        const w = &writer.interface;
+        errWrite(w, "{s}\n", .{to_echo}, client) orelse return;
+        errFlush(w, client) orelse return;
+    } else if (eql(u8, header, "WHOAMI")) {
+        client.writer_mutex.lock();
+        defer client.writer_mutex.unlock();
+        var writer = client.conn.stream.writer(&write_buf);
+        const w = &writer.interface;
+        errWrite(w, "name: {s}, id: {d}\n", .{ client.name, client.rid }, client) orelse return;
+        errFlush(w, client) orelse return;
+    } else if (eql(u8, header, "NAME")) {
+        const name = itr.next() orelse {
+            client.writer_mutex.lock();
+            defer client.writer_mutex.unlock();
+            var writer = client.conn.stream.writer(&write_buf);
+            const w = &writer.interface;
+            errWriteAll(w, "No id or name specified\n", client) orelse return;
+            errFlush(w, client) orelse return;
+            return;
+        };
+        var num_count: usize = 0;
+        for (name) |c| {
+            if (c >= '0' and c <= '9') num_count += 1;
+        }
+        if (num_count == name.len) {
+            client.writer_mutex.lock();
+            defer client.writer_mutex.unlock();
+            var writer = client.conn.stream.writer(&write_buf);
+            const w = &writer.interface;
+            errWriteAll(w, "All numeric name is not allowed\n", client) orelse return;
+            errFlush(w, client) orelse return;
+            return;
+        }
+        const token: *Token = for (state.tokens.items) |*t| {
+            if (t.rid) |rid| if (rid == client.rid) break t;
+        } else {
+            info("Corrupted tokens list. Client with {d} not found.", .{client.rid});
+            return;
+        };
+        state.ga.free(token.name);
+        token.name = state.ga.dupe(u8, name) catch |err| {
+            info("Failed to set name for {d}: {any}", .{ client.rid, err });
+            return;
+        };
+        client.name = token.name;
+        info("Named {d} -> {s}", .{ client.rid, name });
+    } else if (eql(u8, header, "LINK")) {
+        client.writer_mutex.lock();
+        defer client.writer_mutex.unlock();
+        var writer = client.conn.stream.writer(&write_buf);
+        const w = &writer.interface;
+        const buf = itr.next() orelse {
+            errWriteAll(w, "No id or name specified\n", client) orelse return;
+            errFlush(w, client) orelse return;
+            return;
+        };
+        const c2 = getClientById(buf, state) orelse getClientByName(buf, state) orelse {
+            errWrite(w, "Failed to connect to {s}. Invalid id or name\n", .{buf}, client) orelse return;
+            errFlush(w, client) orelse return;
+            return;
+        };
+        linkClients(client, c2, state);
+    } else if (eql(u8, header, "UNLINK")) {
+        client.writer_mutex.lock();
+        defer client.writer_mutex.unlock();
+        var writer = client.conn.stream.writer(&write_buf);
+        const w = &writer.interface;
+        const buf = itr.next() orelse {
+            errWriteAll(w, "No id or name specified\n", client) orelse return;
+            errFlush(w, client) orelse return;
+            return;
+        };
+        const c2 = getClientById(buf, state) orelse getClientByName(buf, state) orelse {
+            errWrite(w, "Failed to unlink from {s}. Invalid id or name\n", .{buf}, client) orelse return;
+            errFlush(w, client) orelse return;
+            return;
+        };
+        unlinkClients(client, c2, state);
+    } else if (eql(u8, header, "SENDTO")) {
+        var writer = client.conn.stream.writer(&write_buf);
+        const w = &writer.interface;
+        const buf = itr.next() orelse {
+            client.writer_mutex.lock();
+            defer client.writer_mutex.unlock();
+            errWriteAll(w, "No id or name specified\n", client) orelse return;
+            errFlush(w, client) orelse return;
+            return;
+        };
+        const to_send = std.mem.trim(u8, itr.rest(), " \n");
+        const c2 = getClientById(buf, state) orelse getClientByName(buf, state) orelse {
+            client.writer_mutex.lock();
+            defer client.writer_mutex.unlock();
+            errWrite(w, "Failed to send message to {s}. Invalid id or name\n", .{buf}, client) orelse return;
+            errFlush(w, client) orelse return;
+            return;
+        };
+        sendMsg(client, c2, to_send);
+    } else if (eql(u8, header, "ALL")) {
+        sendAll(client, std.mem.trim(u8, itr.rest(), " \n"));
+    } else if (eql(u8, header, "GETINFO")) {
+        const buf = itr.next() orelse {
+            displayAll(client, state);
+            return;
+        };
+        const to_fetch = getClientById(buf, state) orelse getClientByName(buf, state) orelse {
+            client.writer_mutex.lock();
+            defer client.writer_mutex.unlock();
+            var writer = client.conn.stream.writer(&write_buf);
+            const w = &writer.interface;
+            errWrite(w, "Failed to getinfo of {s}. Invalid id or name\n", .{buf}, client) orelse return;
+            errFlush(w, client) orelse return;
+            return;
+        };
+        displayClient(client, to_fetch, state);
+    }
+}
+
 fn linkClients(client1: *Client, client2: *Client, state: *State) void {
     if (client1 == client2) return;
     const id1 = client1.rid;
@@ -244,40 +407,6 @@ fn displayAll(client: *Client, state: *State) void {
     }
 }
 
-pub fn handleClient(client: *Client, state: *State) void {
-    defer cleanupClient(client, state);
-    defer client.online = false;
-    const conn = client.conn;
-    info("Accepted connection from {f}, {d}", .{ conn.address, client.rid });
-
-    var read_buf: [1024]u8 = undefined;
-    var reader_file = conn.stream.reader(&read_buf).file_reader;
-    const reader = &reader_file.interface;
-
-    while (true) {
-        info("Waiting for data from {d}...", .{client.rid});
-        const msg = reader.takeDelimiter('\n') catch |err| {
-            switch (err) {
-                error.ReadFailed => {
-                    info("Failed to read message from {d}", .{client.rid});
-                    info("Closing...", .{});
-                },
-                else => {
-                    info("Message buffer overflowed", .{});
-                },
-            }
-            break;
-        } orelse {
-            info("Connection closed by client {d}", .{client.rid});
-            break;
-        };
-        const trimmed = std.mem.trim(u8, msg, " ");
-        if (trimmed.len == 0) continue;
-        info("{d} says {s}", .{ client.rid, trimmed });
-        parseHeaderAndAct(client, trimmed, state);
-    }
-}
-
 fn cleanupClient(client: *Client, state: *State) void {
     const id = client.rid;
     state.mutex.lock();
@@ -306,135 +435,6 @@ fn cleanupClient(client: *Client, state: *State) void {
     }
     client.conn.stream.close();
     state.ga.destroy(client);
-}
-
-fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) void {
-    state.mutex.lock();
-    defer state.mutex.unlock();
-
-    var itr = std.mem.tokenizeScalar(u8, msg, ' ');
-    var write_buf: [1024]u8 = undefined;
-    const header = itr.next() orelse return;
-    if (eql(u8, header, "ECHO")) {
-        const to_echo = itr.rest();
-        client.writer_mutex.lock();
-        defer client.writer_mutex.unlock();
-        var writer = client.conn.stream.writer(&write_buf);
-        const w = &writer.interface;
-        errWrite(w, "{s}\n", .{to_echo}, client) orelse return;
-        errFlush(w, client) orelse return;
-    } else if (eql(u8, header, "WHOAMI")) {
-        client.writer_mutex.lock();
-        defer client.writer_mutex.unlock();
-        var writer = client.conn.stream.writer(&write_buf);
-        const w = &writer.interface;
-        errWrite(w, "name: {s}, id: {d}\n", .{ client.name, client.rid }, client) orelse return;
-        errFlush(w, client) orelse return;
-    } else if (eql(u8, header, "NAME")) {
-        const name = itr.next() orelse {
-            client.writer_mutex.lock();
-            defer client.writer_mutex.unlock();
-            var writer = client.conn.stream.writer(&write_buf);
-            const w = &writer.interface;
-            errWriteAll(w, "No id or name specified\n", client) orelse return;
-            errFlush(w, client) orelse return;
-            return;
-        };
-        var num_count: usize = 0;
-        for (name) |c| {
-            if (c >= '0' and c <= '9') num_count += 1;
-        }
-        if (num_count == name.len) {
-            client.writer_mutex.lock();
-            defer client.writer_mutex.unlock();
-            var writer = client.conn.stream.writer(&write_buf);
-            const w = &writer.interface;
-            errWriteAll(w, "All numeric name is not allowed\n", client) orelse return;
-            errFlush(w, client) orelse return;
-            return;
-        }
-        const token: *Token = for (state.tokens.items) |*t| {
-            if (t.rid) |rid| if (rid == client.rid) break t;
-        } else {
-            info("Corrupted tokens list. Client with {d} not found.", .{client.rid});
-            return;
-        };
-        state.ga.free(token.name);
-        token.name = state.ga.dupe(u8, name) catch |err| {
-            info("Failed to set name for {d}: {any}", .{ client.rid, err });
-            return;
-        };
-        client.name = token.name;
-        info("Named {d} -> {s}", .{ client.rid, name });
-    } else if (eql(u8, header, "LINK")) {
-        client.writer_mutex.lock();
-        defer client.writer_mutex.unlock();
-        var writer = client.conn.stream.writer(&write_buf);
-        const w = &writer.interface;
-        const buf = itr.next() orelse {
-            errWriteAll(w, "No id or name specified\n", client) orelse return;
-            errFlush(w, client) orelse return;
-            return;
-        };
-        const c2 = getClientById(buf, state) orelse getClientByName(buf, state) orelse {
-            errWrite(w, "Failed to connect to {s}. Invalid id or name\n", .{buf}, client) orelse return;
-            errFlush(w, client) orelse return;
-            return;
-        };
-        linkClients(client, c2, state);
-    } else if (eql(u8, header, "UNLINK")) {
-        client.writer_mutex.lock();
-        defer client.writer_mutex.unlock();
-        var writer = client.conn.stream.writer(&write_buf);
-        const w = &writer.interface;
-        const buf = itr.next() orelse {
-            errWriteAll(w, "No id or name specified\n", client) orelse return;
-            errFlush(w, client) orelse return;
-            return;
-        };
-        const c2 = getClientById(buf, state) orelse getClientByName(buf, state) orelse {
-            errWrite(w, "Failed to unlink from {s}. Invalid id or name\n", .{buf}, client) orelse return;
-            errFlush(w, client) orelse return;
-            return;
-        };
-        unlinkClients(client, c2, state);
-    } else if (eql(u8, header, "SENDTO")) {
-        var writer = client.conn.stream.writer(&write_buf);
-        const w = &writer.interface;
-        const buf = itr.next() orelse {
-            client.writer_mutex.lock();
-            defer client.writer_mutex.unlock();
-            errWriteAll(w, "No id or name specified\n", client) orelse return;
-            errFlush(w, client) orelse return;
-            return;
-        };
-        const to_send = std.mem.trim(u8, itr.rest(), " \n");
-        const c2 = getClientById(buf, state) orelse getClientByName(buf, state) orelse {
-            client.writer_mutex.lock();
-            defer client.writer_mutex.unlock();
-            errWrite(w, "Failed to send message to {s}. Invalid id or name\n", .{buf}, client) orelse return;
-            errFlush(w, client) orelse return;
-            return;
-        };
-        sendMsg(client, c2, to_send);
-    } else if (eql(u8, header, "ALL")) {
-        sendAll(client, std.mem.trim(u8, itr.rest(), " \n"));
-    } else if (eql(u8, header, "GETINFO")) {
-        const buf = itr.next() orelse {
-            displayAll(client, state);
-            return;
-        };
-        const to_fetch = getClientById(buf, state) orelse getClientByName(buf, state) orelse {
-            client.writer_mutex.lock();
-            defer client.writer_mutex.unlock();
-            var writer = client.conn.stream.writer(&write_buf);
-            const w = &writer.interface;
-            errWrite(w, "Failed to getinfo of {s}. Invalid id or name\n", .{buf}, client) orelse return;
-            errFlush(w, client) orelse return;
-            return;
-        };
-        displayClient(client, to_fetch, state);
-    }
 }
 
 pub const HandshakeResult = union(enum) {
