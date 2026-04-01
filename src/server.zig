@@ -237,5 +237,5 @@ fn updateTokensFile(state: *State) !void {
     try std.json.Stringify.value(tmp, .{ .whitespace = .indent_2 }, writer);
     try writer.writeAll("\n");
     try writer.flush();
-    try state.profile_dir.rename("token.tmp", "jtoken");
+    try state.profile_dir.rename("token.tmp", "token");
 }
