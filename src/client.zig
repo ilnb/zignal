@@ -3,6 +3,7 @@ const info = std.log.info;
 const net = std.net;
 const posix = std.posix;
 const server_mod = @import("server");
+const prompt = "➜ ";
 
 var running = std.atomic.Value(bool).init(true);
 var stream: net.Stream = undefined;
@@ -54,6 +55,7 @@ pub fn main() !void {
             };
         } else if (std.mem.eql(u8, args[i], "--help") or std.mem.eql(u8, args[i], "-h")) {
             std.debug.print("{s}\n", .{help_msg});
+            return;
         }
     }
 
@@ -98,6 +100,8 @@ pub fn main() !void {
     defer recv_thread.join();
 
     while (running.load(.acquire)) {
+        try stdout.writeAll(prompt);
+        try stdout.flush();
         const msg = stdin.takeDelimiter('\n') catch |err| {
             if (!running.load(.acquire)) break;
             return err;
@@ -115,9 +119,8 @@ fn recvFn(r: *std.Io.Reader, stdout: *std.Io.Writer) void {
             std.debug.print("Server disconnected\n", .{});
             running.store(false, .release);
             continue;
-        };
-        const l = line orelse continue;
-        stdout.print("{s}\n", .{l}) catch return;
+        } orelse continue;
+        stdout.print("\r\x1b[2K{s}\n{s}", .{ line, prompt }) catch return;
         stdout.flush() catch return;
     }
 }

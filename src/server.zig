@@ -60,6 +60,7 @@ pub fn main() !void {
                 };
             } else if (std.mem.eql(u8, args[i], "--help") or std.mem.eql(u8, args[i], "-h")) {
                 std.debug.print("{s}\n", .{help_msg});
+                return;
             }
         }
     }
