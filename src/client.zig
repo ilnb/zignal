@@ -3,7 +3,10 @@ const info = std.log.info;
 const net = std.net;
 const posix = std.posix;
 const server_mod = @import("server");
+const UiState = @import("types").UiState;
 const prompt = "➜ ";
+
+var ui = UiState{};
 
 var running = std.atomic.Value(bool).init(true);
 var stream: net.Stream = undefined;
@@ -100,12 +103,30 @@ pub fn main() !void {
     defer recv_thread.join();
 
     while (running.load(.acquire)) {
-        try stdout.writeAll(prompt);
-        try stdout.flush();
+        ui.mutex.lock();
+        while (ui.pending) {
+            const timeout = 50 * std.time.ns_per_ms;
+            ui.cond.timedWait(&ui.mutex, timeout) catch |err| {
+                if (err == error.Timeout) ui.pending = false;
+            };
+        }
+        if (!ui.prompt_vis) {
+            try stdout.writeAll(prompt);
+            try stdout.flush();
+            ui.prompt_vis = true;
+        }
+        ui.mutex.unlock();
+
         const msg = stdin.takeDelimiter('\n') catch |err| {
             if (!running.load(.acquire)) break;
             return err;
         } orelse continue;
+
+        ui.mutex.lock();
+        ui.prompt_vis = false;
+        ui.pending = true;
+        ui.mutex.unlock();
+
         try writer.print("{s}\n", .{msg});
         try writer.flush();
     }
@@ -118,9 +139,22 @@ fn recvFn(r: *std.Io.Reader, stdout: *std.Io.Writer) void {
         const line = r.takeDelimiter('\n') catch {
             std.debug.print("Server disconnected\n", .{});
             running.store(false, .release);
+            ui.cond.signal();
             continue;
         } orelse continue;
-        stdout.print("\r\x1b[2K{s}\n{s}", .{ line, prompt }) catch return;
+
+        ui.mutex.lock();
+        defer {
+            ui.pending = false;
+            ui.cond.signal();
+            ui.mutex.unlock();
+        }
+
+        if (ui.prompt_vis) {
+            stdout.print("\r\x1b[2K{s}\n{s}", .{ line, prompt }) catch return;
+        } else {
+            stdout.print("{s}\n", .{line}) catch return;
+        }
         stdout.flush() catch return;
     }
 }

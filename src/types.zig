@@ -9,6 +9,13 @@ pub const Token = struct {
     name: []u8,
 };
 
+pub const UiState = struct {
+    mutex: std.Thread.Mutex = .{},
+    cond: std.Thread.Condition = .{},
+    prompt_vis: bool = false,
+    pending: bool = false,
+};
+
 pub const Client = struct {
     rid: usize,
     conn: net.Server.Connection,
