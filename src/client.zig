@@ -137,11 +137,16 @@ pub fn main() !void {
 fn recvFn(r: *std.Io.Reader, stdout: *std.Io.Writer) void {
     while (running.load(.acquire)) {
         const line = r.takeDelimiter('\n') catch {
-            std.debug.print("Server disconnected\n", .{});
+            std.debug.print("Server disconnected (Error)\n", .{});
             running.store(false, .release);
             ui.cond.signal();
-            continue;
-        } orelse continue;
+            break;
+        } orelse {
+            std.debug.print("Server disconnected (EOF)\n", .{});
+            running.store(false, .release);
+            ui.cond.signal();
+            break;
+        };
 
         ui.mutex.lock();
         defer {
