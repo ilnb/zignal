@@ -15,7 +15,7 @@ const getClientById = utils.getClientById;
 const getClientByName = utils.getClientByName;
 
 pub fn handleClient(client: *Client, state: *State) void {
-    defer cleanupClient(client, state);
+    // defer cleanupClient(client, state);
     defer client.online = false;
     const conn = client.conn;
     info("Accepted connection from {f}, {d}", .{ conn.address, client.rid });
