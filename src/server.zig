@@ -11,6 +11,7 @@ const Set = types.Set;
 const client_mod = @import("client");
 const utils = @import("utils");
 const getClientNameByToken = utils.getClientNameByToken;
+const checkLock = utils.checkLock;
 
 var running = std.atomic.Value(bool).init(true);
 
@@ -76,15 +77,14 @@ pub fn main() !void {
     var profile_dir = try home_dir.openDir(profile_path, .{});
     defer profile_dir.close();
 
-    const lock_file = profile_dir.createFile("lock", .{ .exclusive = true }) catch |err| switch (err) {
-        error.PathAlreadyExists => {
-            info("An instance of server with profile {s} is already running. Terminating...", .{profile});
-            return;
-        },
-        else => return err,
-    };
-    lock_file.close();
+    checkLock(&profile_dir) catch return;
+    const lock_file = profile_dir.createFile("lock", .{ .truncate = true }) catch |err| return err;
+    defer lock_file.close();
     defer profile_dir.deleteFile("lock") catch {};
+
+    const pid = std.os.linux.getpid();
+    const pid_sl = try bufPrint(&buf, "{d}", .{pid});
+    try lock_file.writeAll(pid_sl);
 
     const addr = net.Address.initIp4(.{0} ** 4, port);
 

@@ -2,6 +2,8 @@ const std = @import("std");
 const bufPrint = std.fmt.bufPrint;
 const types = @import("types");
 const Client = types.Client;
+const utils = @import("utils");
+const checkLock = utils.checkLock;
 
 pub fn handshakeWithServer(s: *std.net.Stream, profile: []const u8) !std.fs.Dir {
     const home = std.posix.getenv("HOME") orelse return error.NoHomeDir;
@@ -13,16 +15,21 @@ pub fn handshakeWithServer(s: *std.net.Stream, profile: []const u8) !std.fs.Dir 
     try home_dir.makePath(profile_path);
     var profile_dir = try home_dir.openDir(profile_path, .{});
 
-    const lock_file = try profile_dir.createFile("lock", .{ .exclusive = true });
-    lock_file.close();
-    errdefer profile_dir.deleteFile("lock") catch {};
+    checkLock(&profile_dir) catch |err| return err;
+    const lock_file = profile_dir.createFile("lock", .{ .truncate = true }) catch |err| return err;
+    defer lock_file.close();
 
-    const token_file = profile_dir.openFile("token", .{ .mode = .read_write }) catch |err| switch (err) {
-        error.FileNotFound => blk: {
-            break :blk try profile_dir.createFile("token", .{ .truncate = false, .read = true });
-        },
-        else => return err,
-    };
+    const pid = std.os.linux.getpid();
+    const pid_sl = try bufPrint(&buf, "{d}", .{pid});
+    try lock_file.writeAll(pid_sl);
+
+    // const token_file = profile_dir.openFile("token", .{ .mode = .read_write }) catch |err| switch (err) {
+    //     error.FileNotFound => blk: {
+    //         break :blk try profile_dir.createFile("token", .{ .truncate = false, .read = true });
+    //     },
+    //     else => return err,
+    // };
+    const token_file = profile_dir.createFile("token", .{ .truncate = false, .read = true }) catch |err| return err;
     defer token_file.close();
 
     const new_user = (try token_file.stat()).size == 0;
