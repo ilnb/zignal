@@ -88,6 +88,7 @@ pub fn main() !void {
         .flags = 0,
     };
     posix.sigaction(posix.SIG.INT, &sa, null);
+    posix.sigaction(posix.SIG.HUP, &sa, null);
 
     var profile_dir = server_mod.handshakeWithServer(&stream, profile) catch |err| {
         std.debug.print("Handshake failed with error {any}.\n", .{err});
@@ -102,6 +103,9 @@ pub fn main() !void {
     };
     defer recv_thread.join();
 
+    var fds = [_]posix.pollfd{
+        .{ .fd = std.fs.File.stdin().handle, .events = posix.POLL.IN, .revents = 0 },
+    };
     while (running.load(.acquire)) {
         ui.mutex.lock();
         while (ui.pending) {
@@ -116,6 +120,15 @@ pub fn main() !void {
             ui.prompt_vis = true;
         }
         ui.mutex.unlock();
+
+        fds[0].revents = 0; // reset result
+        const ready = posix.poll(&fds, 100) catch break; // poll for 100ms
+        if (ready == 0) continue; // timed out
+        if (fds[0].revents & (posix.POLL.ERR | posix.POLL.HUP | posix.POLL.NVAL) != 0) {
+            running.store(false, .release);
+            break;
+        } // stdin errored out
+        if (fds[0].revents & posix.POLL.IN == 0) continue; // no data to read
 
         const msg = stdin.takeDelimiter('\n') catch |err| {
             if (!running.load(.acquire)) break;
@@ -142,9 +155,11 @@ fn recvFn(r: *std.Io.Reader, stdout: *std.Io.Writer) void {
             ui.cond.signal();
             break;
         } orelse {
-            std.debug.print("Server disconnected (EOF)\n", .{});
-            running.store(false, .release);
-            ui.cond.signal();
+            if (running.load(.acquire)) {
+                std.debug.print("Server disconnected (EOF)\n", .{});
+                running.store(false, .release);
+                ui.cond.signal();
+            }
             break;
         };
 

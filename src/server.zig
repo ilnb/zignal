@@ -131,6 +131,7 @@ pub fn main() !void {
         .flags = 0,
     };
     posix.sigaction(posix.SIG.INT, &sa, null);
+    posix.sigaction(posix.SIG.HUP, &sa, null);
 
     var id: usize = 0;
     while (running.load(.acquire)) {
