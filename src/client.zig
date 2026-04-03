@@ -91,7 +91,7 @@ pub fn main() !void {
     posix.sigaction(posix.SIG.HUP, &sa, null);
 
     var profile_dir = server_mod.handshakeWithServer(&stream, profile) catch |err| {
-        std.debug.print("Handshake failed with error {any}.\n", .{err});
+        std.debug.print("Handshake failed with {any}.\n", .{err});
         return;
     };
     defer profile_dir.close();
