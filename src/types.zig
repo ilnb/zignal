@@ -10,7 +10,7 @@ pub const Token = struct {
 };
 
 pub const UiState = struct {
-    mutex: std.Thread.Mutex = .{},
+    mutex: Mutex = .{},
     cond: std.Thread.Condition = .{},
     prompt_vis: bool = false,
     pending: bool = false,
