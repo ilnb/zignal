@@ -4,9 +4,10 @@ const net = std.net;
 const posix = std.posix;
 const server_mod = @import("server");
 const UiState = @import("types").UiState;
-const prompt = "➜ ";
-
 var ui = UiState{};
+
+const prompt = "➜ ";
+const line_clear = "\r\x1b[2K";
 
 var running = std.atomic.Value(bool).init(true);
 var stream: net.Stream = undefined;
@@ -98,7 +99,7 @@ pub fn main() !void {
     defer profile_dir.deleteFile("lock") catch {};
 
     const recv_thread = std.Thread.spawn(.{}, recvFn, .{ reader, stdout }) catch |err| {
-        std.debug.print("Error when trying to spawn thread.\nErr: {any}\n", .{err});
+        std.debug.print("Error when trying to spawn thread: {any}\n", .{err});
         return;
     };
     defer recv_thread.join();
@@ -121,14 +122,14 @@ pub fn main() !void {
         }
         ui.mutex.unlock();
 
-        fds[0].revents = 0; // reset result
-        const ready = posix.poll(&fds, 100) catch break; // poll for 100ms
-        if (ready == 0) continue; // timed out
+        fds[0].revents = 0;
+        const ready = posix.poll(&fds, 100) catch break;
+        if (ready == 0) continue;
         if (fds[0].revents & (posix.POLL.ERR | posix.POLL.HUP | posix.POLL.NVAL) != 0) {
             running.store(false, .release);
             break;
-        } // stdin errored out
-        if (fds[0].revents & posix.POLL.IN == 0) continue; // no data to read
+        }
+        if (fds[0].revents & posix.POLL.IN == 0) continue;
 
         const msg = stdin.takeDelimiter('\n') catch |err| {
             if (!running.load(.acquire)) break;
@@ -143,20 +144,20 @@ pub fn main() !void {
         try writer.print("{s}\n", .{msg});
         try writer.flush();
     }
-    try stdout.writeAll("Closing the client\n");
+    try stdout.print("{s}Closing the client\n", .{line_clear});
     try stdout.flush();
 }
 
 fn recvFn(r: *std.Io.Reader, stdout: *std.Io.Writer) void {
     while (running.load(.acquire)) {
         const line = r.takeDelimiter('\n') catch {
-            std.debug.print("Server disconnected (Error)\n", .{});
+            std.debug.print("{s}Server disconnected (Error)\n", .{line_clear});
             running.store(false, .release);
             ui.cond.signal();
             break;
         } orelse {
             if (running.load(.acquire)) {
-                std.debug.print("Server disconnected (EOF)\n", .{});
+                std.debug.print("{s}Server disconnected (EOF)\n", .{line_clear});
                 running.store(false, .release);
                 ui.cond.signal();
             }
@@ -171,7 +172,7 @@ fn recvFn(r: *std.Io.Reader, stdout: *std.Io.Writer) void {
         }
 
         if (ui.prompt_vis) {
-            stdout.print("\r\x1b[2K{s}\n{s}", .{ line, prompt }) catch return;
+            stdout.print("{s}{s}\n{s}", .{ line_clear, line, prompt }) catch return;
         } else {
             stdout.print("{s}\n", .{line}) catch return;
         }
