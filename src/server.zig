@@ -78,7 +78,7 @@ pub fn main() !void {
     defer profile_dir.close();
 
     checkLock(&profile_dir) catch return;
-    const lock_file = profile_dir.createFile("lock", .{ .truncate = true }) catch |err| return err;
+    const lock_file = profile_dir.createFile("lock", .{}) catch |err| return err;
     defer lock_file.close();
     defer profile_dir.deleteFile("lock") catch {};
 

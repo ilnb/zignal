@@ -16,7 +16,7 @@ pub fn handshakeWithServer(s: *std.net.Stream, profile: []const u8) !std.fs.Dir 
     var profile_dir = try home_dir.openDir(profile_path, .{});
 
     checkLock(&profile_dir) catch |err| return err;
-    const lock_file = profile_dir.createFile("lock", .{ .truncate = true }) catch |err| return err;
+    const lock_file = profile_dir.createFile("lock", .{}) catch |err| return err;
     defer lock_file.close();
 
     const pid = std.os.linux.getpid();
