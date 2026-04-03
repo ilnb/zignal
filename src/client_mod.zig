@@ -23,12 +23,6 @@ pub fn handshakeWithServer(s: *std.net.Stream, profile: []const u8) !std.fs.Dir 
     const pid_sl = try bufPrint(&buf, "{d}", .{pid});
     try lock_file.writeAll(pid_sl);
 
-    // const token_file = profile_dir.openFile("token", .{ .mode = .read_write }) catch |err| switch (err) {
-    //     error.FileNotFound => blk: {
-    //         break :blk try profile_dir.createFile("token", .{ .truncate = false, .read = true });
-    //     },
-    //     else => return err,
-    // };
     const token_file = profile_dir.createFile("token", .{ .truncate = false, .read = true }) catch |err| return err;
     defer token_file.close();
 
