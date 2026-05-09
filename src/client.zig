@@ -131,29 +131,22 @@ pub fn main(init: std.process.Init) !void {
         .{ .fd = File.stdin().handle, .events = posix.POLL.IN, .revents = 0 },
     };
     while (running.load(.acquire)) {
-        {
-            try ui.mutex.lock(io);
-            defer ui.mutex.unlock(io);
-            const wall_clock = Io.Clock.awake;
-            const start = Io.Clock.now(wall_clock, io);
-            const timeout = 50;
-            while (ui.pending) {
-                const elapsed = start.untilNow(io, wall_clock);
-                if (elapsed.toMilliseconds() >= timeout) {
-                    ui.pending = false;
-                    break;
-                }
-            }
-            if (!ui.prompt_vis) {
-                try stdout.writeAll(prompt);
-                try stdout.flush();
-                ui.prompt_vis = true;
-            }
+        try ui.mutex.lock(io);
+        const timeout = 50;
+        while (ui.pending) {
+            timedWait(&ui.cond, &ui.mutex, timeout) catch |err| {
+                if (err == error.Timeout) ui.pending = false;
+            };
         }
+        if (!ui.prompt_vis) {
+            try stdout.writeAll(prompt);
+            try stdout.flush();
+            ui.prompt_vis = true;
+        }
+        ui.mutex.unlock(io);
 
         fds[0].revents = 0;
-        const ready = posix.poll(&fds, 100) catch break;
-        if (ready == 0) continue;
+        if (posix.poll(&fds, 100) catch break == 0) continue;
         if (fds[0].revents & (posix.POLL.ERR | posix.POLL.HUP | posix.POLL.NVAL) != 0) {
             running.store(false, .release);
             break;
@@ -163,18 +156,64 @@ pub fn main(init: std.process.Init) !void {
         const msg = stdin.takeDelimiter('\n') catch |err| {
             if (!running.load(.acquire)) break;
             return err;
-        } orelse continue;
+        } orelse {
+            running.store(false, .release);
+            ui.cond.signal(io);
+            try stream.shutdown(io, .recv);
+            break;
+        };
 
-        try ui.mutex.lock(io);
-        ui.prompt_vis = false;
-        ui.pending = true;
-        ui.mutex.unlock(io);
+        if (msg.len > 0) {
+            try ui.mutex.lock(io);
+            ui.prompt_vis = false;
+            ui.pending = true;
+            ui.mutex.unlock(io);
 
-        try writer.print("{s}\n", .{msg});
-        try writer.flush();
+            try writer.print("{s}\n", .{msg});
+            try writer.flush();
+        } else {
+            try ui.mutex.lock(io);
+            ui.prompt_vis = false;
+            ui.mutex.unlock(io);
+        }
     }
     try stdout.print("{s}Closing the client\n", .{line_clear});
     try stdout.flush();
+}
+
+fn timedWait(cond: *Io.Condition, mutex: *Io.Mutex, timeout_ms: i64) !void {
+    var epoch = cond.epoch.load(.acquire);
+    {
+        const prev_state = cond.state.fetchAdd(.{ .waiters = 1, .signals = 0 }, .monotonic);
+        std.debug.assert(prev_state.waiters < std.math.maxInt(u16));
+    }
+    mutex.unlock(io);
+    defer mutex.lockUncancelable(io);
+
+    const wall_clock = Io.Clock.awake;
+    const now = Io.Clock.now(wall_clock, io);
+    const deadline = now.addDuration(.fromMilliseconds(timeout_ms));
+
+    const timeout = Io.Timeout{ .deadline = .{ .raw = deadline, .clock = wall_clock } };
+
+    while (true) {
+        const result = io.futexWaitTimeout(u32, &cond.epoch.raw, epoch, timeout);
+        epoch = cond.epoch.load(.acquire);
+
+        var prev_state = cond.state.load(.monotonic);
+        while (prev_state.signals > 0) {
+            prev_state = cond.state.cmpxchgWeak(prev_state, .{
+                .waiters = prev_state.waiters - 1,
+                .signals = prev_state.signals - 1,
+            }, .acquire, .monotonic) orelse return;
+        }
+
+        result catch |err| {
+            const state = cond.state.fetchSub(.{ .waiters = 1, .signals = 0 }, .monotonic);
+            std.debug.assert(state.waiters > 0);
+            return err;
+        };
+    }
 }
 
 fn recvFn(r: *Io.Reader, stdout: *Io.Writer) !void {
@@ -200,7 +239,11 @@ fn recvFn(r: *Io.Reader, stdout: *Io.Writer) !void {
             ui.mutex.unlock(io);
         }
 
-        if (ui.prompt_vis) {
+        if (line.len == 0) {
+            if (ui.prompt_vis) {
+                stdout.print("{s}{s}", .{ line_clear, prompt }) catch return;
+            }
+        } else if (ui.prompt_vis) {
             stdout.print("{s}{s}\n{s}", .{ line_clear, line, prompt }) catch return;
         } else {
             stdout.print("{s}\n", .{line}) catch return;
