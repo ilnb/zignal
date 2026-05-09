@@ -91,8 +91,8 @@ pub fn main(init: std.process.Init) !void {
     defer server.deinit(io);
     info("Server listening on port {d}", .{port});
 
-    const timeout = posix.timeval{ .sec = 0, .usec = 500000 };
-    try posix.setsockopt(server.socket.handle, posix.SOL.SOCKET, posix.SO.RCVTIMEO, &std.mem.toBytes(timeout));
+    // const timeout = posix.timeval{ .sec = 0, .usec = 500000 };
+    // try posix.setsockopt(server.socket.handle, posix.SOL.SOCKET, posix.SO.RCVTIMEO, &std.mem.toBytes(timeout));
 
     var state = State{
         .clients = .empty,
