@@ -141,7 +141,7 @@ pub fn main(init: std.process.Init) !void {
     var id: usize = 0;
     while (running.load(.acquire)) {
         fds[0].revents = 0;
-        if (posix.poll(&fds, 500) catch break == 0) continue;
+        if (posix.poll(&fds, 100) catch break == 0) continue;
         if (fds[0].revents & posix.POLL.IN == 0) continue;
 
         const conn = server.accept(io) catch |err| switch (err) {
