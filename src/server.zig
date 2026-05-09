@@ -21,7 +21,6 @@ var io: std.Io = undefined;
 pub fn handleSig(sig: posix.SIG) callconv(.c) void {
     _ = sig;
     running.store(false, .release);
-    _ = linux.shutdown(server.socket.handle, linux.SHUT.RDWR);
 }
 
 pub fn main(init: std.process.Init) !void {
