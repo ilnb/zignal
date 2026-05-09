@@ -19,7 +19,7 @@ var io: Io = undefined;
 pub fn handleSig(sig: posix.SIG) callconv(.c) void {
     _ = sig;
     if (!running.swap(false, .acq_rel)) return;
-    stream.close(io);
+    stream.shutdown(io, .recv) catch {};
     File.stdin().close(io);
 }
 
@@ -75,7 +75,12 @@ pub fn main(init: std.process.Init) !void {
     var profile_dir = try home_dir.createDirPathOpen(io, profile_path, .{});
     defer profile_dir.close(io);
 
-    try utils.checkLock(init.io, &profile_dir);
+    utils.checkLock(init.io, &profile_dir) catch |err| {
+        if (err != error.EndOfStream) {
+            std.debug.print("Lock check failed with error: {any}", .{err});
+            return;
+        }
+    };
     const lock_file = try profile_dir.createFile(io, "lock", .{});
     defer profile_dir.deleteFile(io, "lock") catch {};
     defer lock_file.close(io);

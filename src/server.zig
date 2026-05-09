@@ -1,6 +1,7 @@
 const std = @import("std");
 const net = std.Io.net;
 const posix = std.posix;
+const linux = std.os.linux;
 const bufPrint = std.fmt.bufPrint;
 const info = std.log.info;
 const types = @import("types");
@@ -14,14 +15,17 @@ const getClientNameByToken = utils.getClientNameByToken;
 const checkLock = utils.checkLock;
 
 var running = std.atomic.Value(bool).init(true);
+var server: net.Server = undefined;
+var io: std.Io = undefined;
 
 pub fn handleSig(sig: posix.SIG) callconv(.c) void {
     _ = sig;
     running.store(false, .release);
+    _ = linux.shutdown(server.socket.handle, linux.SHUT.RDWR);
 }
 
 pub fn main(init: std.process.Init) !void {
-    const io = init.io;
+    io = init.io;
     const ga = init.gpa;
     const args = try init.minimal.args.toSlice(init.arena.allocator());
 
@@ -75,8 +79,10 @@ pub fn main(init: std.process.Init) !void {
     defer profile_dir.close(io);
 
     checkLock(init.io, &profile_dir) catch |err| {
-        std.debug.print("Lock check failed with eror: {any}", .{err});
-        return;
+        if (err != error.EndOfStream) {
+            std.debug.print("Lock check failed with error: {any}", .{err});
+            return;
+        }
     };
     const lock_file = try profile_dir.createFile(io, "lock", .{});
     defer lock_file.close(io);
@@ -87,12 +93,9 @@ pub fn main(init: std.process.Init) !void {
     try lock_file.writeStreamingAll(io, pid_sl);
 
     const addr = net.IpAddress{ .ip4 = net.Ip4Address.unspecified(port) };
-    var server = try addr.listen(io, .{ .reuse_address = true });
+    server = try addr.listen(io, .{ .reuse_address = true });
     defer server.deinit(io);
     info("Server listening on port {d}", .{port});
-
-    // const timeout = posix.timeval{ .sec = 0, .usec = 500000 };
-    // try posix.setsockopt(server.socket.handle, posix.SOL.SOCKET, posix.SO.RCVTIMEO, &std.mem.toBytes(timeout));
 
     var state = State{
         .clients = .empty,
@@ -132,7 +135,6 @@ pub fn main(init: std.process.Init) !void {
     };
     posix.sigaction(posix.SIG.INT, &sa, null);
     posix.sigaction(posix.SIG.HUP, &sa, null);
-    posix.sigaction(posix.SIG.IO, &sa, null);
 
     var id: usize = 0;
     while (running.load(.acquire)) {
@@ -197,7 +199,6 @@ pub fn main(init: std.process.Init) !void {
 }
 
 fn populateTokens(state: *State) !void {
-    const io = state.io;
     var buf: [1024]u8 = undefined;
     const token_file = try state.profile_dir.createFile(io, "token", .{ .truncate = false, .read = true });
     defer token_file.close(io);
@@ -224,7 +225,6 @@ fn populateTokens(state: *State) !void {
 }
 
 fn updateTokensFile(state: *State) !void {
-    const io = state.io;
     const profile_dir = state.profile_dir;
     const tmp_file = try profile_dir.createFile(io, "token.tmp", .{});
     defer tmp_file.close(io);
