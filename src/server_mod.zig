@@ -189,6 +189,13 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
             return;
         };
         try displayClient(client, to_fetch, state);
+    } else {
+        var writer = client.conn.writer(io, &write_buf);
+        const w = &writer.interface;
+        try client.writer_mutex.lock(io);
+        defer client.writer_mutex.unlock(io);
+        errWrite(w, "Invalid cmd {s}\n", .{header}, client) orelse return;
+        errFlush(w, client) orelse return;
     }
 }
 
