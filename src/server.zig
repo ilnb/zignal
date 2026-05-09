@@ -15,8 +15,6 @@ const getClientNameByToken = utils.getClientNameByToken;
 const checkLock = utils.checkLock;
 
 var running = std.atomic.Value(bool).init(true);
-var server: net.Server = undefined;
-var io: std.Io = undefined;
 
 pub fn handleSig(sig: posix.SIG) callconv(.c) void {
     _ = sig;
@@ -24,7 +22,7 @@ pub fn handleSig(sig: posix.SIG) callconv(.c) void {
 }
 
 pub fn main(init: std.process.Init) !void {
-    io = init.io;
+    const io = init.io;
     const ga = init.gpa;
     const args = try init.minimal.args.toSlice(init.arena.allocator());
 
@@ -92,7 +90,7 @@ pub fn main(init: std.process.Init) !void {
     try lock_file.writeStreamingAll(io, pid_sl);
 
     const addr = net.IpAddress{ .ip4 = net.Ip4Address.unspecified(port) };
-    server = try addr.listen(io, .{ .reuse_address = true });
+    var server = try addr.listen(io, .{ .reuse_address = true });
     defer server.deinit(io);
     info("Server listening on port {d}", .{port});
 
@@ -205,6 +203,7 @@ pub fn main(init: std.process.Init) !void {
 }
 
 fn populateTokens(state: *State) !void {
+    const io = state.io;
     var buf: [1024]u8 = undefined;
     const token_file = try state.profile_dir.createFile(io, "token", .{ .truncate = false, .read = true });
     defer token_file.close(io);
@@ -231,6 +230,7 @@ fn populateTokens(state: *State) !void {
 }
 
 fn updateTokensFile(state: *State) !void {
+    const io = state.io;
     const profile_dir = state.profile_dir;
     const tmp_file = try profile_dir.createFile(io, "token.tmp", .{});
     defer tmp_file.close(io);
