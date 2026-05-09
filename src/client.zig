@@ -85,7 +85,7 @@ pub fn main(init: std.process.Init) !void {
     try lock_file.writeStreamingAll(io, pid_sl);
 
     const addr = net.IpAddress{ .ip4 = net.Ip4Address.unspecified(port) };
-    stream = try addr.connect(io, .{});
+    stream = try addr.connect(io, .{ .mode = .stream, .protocol = .tcp });
 
     var wbuf: [1024]u8 = undefined;
     var writer_file = stream.writer(io, &wbuf);
