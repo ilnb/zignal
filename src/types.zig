@@ -1,6 +1,6 @@
 const std = @import("std");
-const net = std.net;
-const Mutex = std.Thread.Mutex;
+const net = std.Io.net;
+const Mutex = std.Io.Mutex;
 pub const Set = @import("avl").Set;
 
 pub const Token = struct {
@@ -10,29 +10,25 @@ pub const Token = struct {
 };
 
 pub const UiState = struct {
-    mutex: Mutex = .{},
-    cond: std.Thread.Condition = .{},
+    mutex: Mutex = .init,
+    cond: std.Io.Condition = .init,
     prompt_vis: bool = false,
     pending: bool = false,
 };
 
 pub const Client = struct {
     rid: usize,
-    conn: net.Server.Connection,
+    conn: net.Stream,
     name: []u8,
-    online: bool,
-    writer_mutex: Mutex,
-    active: std.ArrayList(*Client),
-    active_mutex: Mutex,
+    online: bool = true,
+    writer_mutex: Mutex = .init,
+    active: std.ArrayList(*Client) = .empty,
+    active_mutex: Mutex = .init,
 
-    pub fn init(c: *Client, conn: *const net.Server.Connection, token: *Token) void {
+    pub fn init(c: *Client, conn: *const net.Stream, token: *Token) void {
         c.rid = token.rid.?;
         c.conn = conn.*;
         c.name = token.name;
-        c.online = true;
-        c.writer_mutex = .{};
-        c.active = .empty;
-        c.active_mutex = .{};
     }
 };
 
@@ -40,7 +36,8 @@ pub const State = struct {
     clients: std.ArrayList(*Client),
     links: std.AutoHashMap(usize, Set(usize)),
     mutex: Mutex,
-    profile_dir: std.fs.Dir,
+    profile_dir: std.Io.Dir,
     tokens: std.ArrayList(Token),
     ga: std.mem.Allocator,
+    io: std.Io,
 };

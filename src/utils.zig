@@ -51,19 +51,19 @@ pub fn getClientNameByToken(state: *State, token: *Token) ?[]u8 {
     } else null;
 }
 
-pub fn checkLock(profile_dir: *std.fs.Dir) !void {
-    const lock_file = profile_dir.openFile("lock", .{}) catch |err| {
+pub fn checkLock(io: std.Io, profile_dir: *std.Io.Dir) !void {
+    const lock_file = profile_dir.openFile(io, "lock", .{}) catch |err| {
         if (err == error.FileNotFound) return;
         std.debug.print("Error on lock file: {any}\n", .{err});
         return err;
     };
-    defer lock_file.close();
+    defer lock_file.close(io);
 
     var buf: [16]u8 = undefined;
-    const bytes = lock_file.readAll(&buf) catch |err| return err;
+    const bytes = try lock_file.readStreaming(io, &.{&buf});
     const prev_pid = std.fmt.parseInt(std.os.linux.pid_t, buf[0..bytes], 10) catch return;
 
-    std.posix.kill(prev_pid, 0) catch |err| {
+    std.posix.kill(prev_pid, @enumFromInt(0)) catch |err| {
         if (err == error.ProcessNotFound) return;
         return err;
     };

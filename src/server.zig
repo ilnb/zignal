@@ -1,5 +1,5 @@
 const std = @import("std");
-const net = std.net;
+const net = std.Io.net;
 const posix = std.posix;
 const bufPrint = std.fmt.bufPrint;
 const info = std.log.info;
@@ -15,32 +15,27 @@ const checkLock = utils.checkLock;
 
 var running = std.atomic.Value(bool).init(true);
 
-pub fn handleSig(sig: i32) callconv(.c) void {
+pub fn handleSig(sig: posix.SIG) callconv(.c) void {
     _ = sig;
     running.store(false, .release);
 }
 
-pub fn main() !void {
-    var gpa = std.heap.DebugAllocator(.{}){};
-    defer {
-        const status = gpa.deinit();
-        if (status == .leak) std.testing.expect(false) catch @panic("FAILURE");
-    }
-    const ga = gpa.allocator();
-
-    const args = try std.process.argsAlloc(ga);
-    defer std.process.argsFree(ga, args);
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+    const ga = init.gpa;
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
 
     var profile: []const u8 = "default";
     var port: u16 = 8000;
     const help_msg =
+        \\Usage:
         \\ -h, --help            Display help
         \\ -p, --port <num>      Specify port, defaults to 8000
         \\ -P, --profile <name>  Specify profile, defaults to "default"
     ;
 
     {
-        var i: usize = 0;
+        var i: usize = 1;
         while (i < args.len) : (i += 1) {
             if (std.mem.eql(u8, args[i], "--profile") or std.mem.eql(u8, args[i], "-P")) {
                 if (i + 1 == args.len) {
@@ -62,44 +57,49 @@ pub fn main() !void {
             } else if (std.mem.eql(u8, args[i], "--help") or std.mem.eql(u8, args[i], "-h")) {
                 std.debug.print("{s}\n", .{help_msg});
                 return;
+            } else {
+                std.debug.print("Invalid flag. {s}\n", .{help_msg});
+                return;
             }
         }
     }
 
     var buf: [1024]u8 = undefined;
 
-    const home = std.posix.getenv("HOME") orelse return error.NoHomeDir;
-    var home_dir = try std.fs.openDirAbsolute(home, .{});
-    defer home_dir.close();
+    const home = init.environ_map.get("HOME").?;
+    var home_dir = try std.Io.Dir.openDirAbsolute(io, home, .{});
+    defer home_dir.close(io);
 
     const profile_path = try bufPrint(&buf, ".config/zignal/server/{s}", .{profile});
-    try home_dir.makePath(profile_path);
-    var profile_dir = try home_dir.openDir(profile_path, .{});
-    defer profile_dir.close();
+    var profile_dir = try home_dir.createDirPathOpen(io, profile_path, .{});
+    defer profile_dir.close(io);
 
-    checkLock(&profile_dir) catch return;
-    const lock_file = profile_dir.createFile("lock", .{}) catch |err| return err;
-    defer lock_file.close();
-    defer profile_dir.deleteFile("lock") catch {};
+    checkLock(init.io, &profile_dir) catch |err| {
+        std.debug.print("Lock check failed with eror: {any}", .{err});
+        return;
+    };
+    const lock_file = try profile_dir.createFile(io, "lock", .{});
+    defer lock_file.close(io);
+    defer profile_dir.deleteFile(io, "lock") catch {};
 
     const pid = std.os.linux.getpid();
     const pid_sl = try bufPrint(&buf, "{d}", .{pid});
-    try lock_file.writeAll(pid_sl);
+    try lock_file.writeStreamingAll(io, pid_sl);
 
-    const addr = net.Address.initIp4(.{0} ** 4, port);
-
-    var server = try addr.listen(.{ .reuse_address = true });
-    defer server.deinit();
+    const addr = net.IpAddress{ .ip4 = net.Ip4Address.unspecified(port) };
+    var server = try addr.listen(io, .{ .reuse_address = true });
+    defer server.deinit(io);
     info("Server listening on port {d}", .{port});
 
     const timeout = posix.timeval{ .sec = 0, .usec = 500000 };
-    try posix.setsockopt(server.stream.handle, posix.SOL.SOCKET, posix.SO.RCVTIMEO, &std.mem.toBytes(timeout));
+    try posix.setsockopt(server.socket.handle, posix.SOL.SOCKET, posix.SO.RCVTIMEO, &std.mem.toBytes(timeout));
 
     var state = State{
         .clients = .empty,
         .links = std.AutoHashMap(usize, Set(usize)).init(ga),
         .ga = ga,
-        .mutex = .{},
+        .io = io,
+        .mutex = .init,
         .tokens = .empty,
         .profile_dir = profile_dir,
     };
@@ -132,10 +132,11 @@ pub fn main() !void {
     };
     posix.sigaction(posix.SIG.INT, &sa, null);
     posix.sigaction(posix.SIG.HUP, &sa, null);
+    posix.sigaction(posix.SIG.IO, &sa, null);
 
     var id: usize = 0;
     while (running.load(.acquire)) {
-        const conn = server.accept() catch |err| switch (err) {
+        const conn = server.accept(io) catch |err| switch (err) {
             error.WouldBlock => continue,
             else => {
                 if (!running.load(.acquire)) break;
@@ -143,15 +144,15 @@ pub fn main() !void {
             },
         };
         const no_timeout = posix.timeval{ .sec = 0, .usec = 0 };
-        try posix.setsockopt(conn.stream.handle, posix.SOL.SOCKET, posix.SO.RCVTIMEO, &std.mem.toBytes(no_timeout));
+        try posix.setsockopt(conn.socket.handle, posix.SOL.SOCKET, posix.SO.RCVTIMEO, &std.mem.toBytes(no_timeout));
 
         var result = client_mod.handshakeWithClient(conn, &state) catch |err| {
-            info("Handshake failed with client {f} with error {any}. Terminating connection", .{ conn.address, err });
-            var writer = conn.stream.writer(&buf);
+            info("Handshake failed with client {f} with error {any}. Terminating connection", .{ conn.socket.address, err });
+            var writer = conn.writer(io, &buf);
             const interface = &writer.interface;
             try interface.print("{any}\n", .{err});
             try interface.flush();
-            conn.stream.close();
+            conn.close(io);
             continue;
         };
 
@@ -196,13 +197,14 @@ pub fn main() !void {
 }
 
 fn populateTokens(state: *State) !void {
+    const io = state.io;
     var buf: [1024]u8 = undefined;
-    const token_file = try state.profile_dir.createFile("token", .{ .truncate = false, .read = true });
-    defer token_file.close();
-    var token_file_r = token_file.reader(&buf);
+    const token_file = try state.profile_dir.createFile(io, "token", .{ .truncate = false, .read = true });
+    defer token_file.close(io);
+    var token_file_r = token_file.reader(io, &buf);
     const reader = &token_file_r.interface;
 
-    const file_size = (try token_file.stat()).size;
+    const file_size = (try token_file.stat(io)).size;
     if (file_size == 0) {
         info("Empty tokens file", .{});
         return;
@@ -222,10 +224,12 @@ fn populateTokens(state: *State) !void {
 }
 
 fn updateTokensFile(state: *State) !void {
-    const tmp_file = try state.profile_dir.createFile("token.tmp", .{});
-    defer tmp_file.close();
+    const io = state.io;
+    const profile_dir = state.profile_dir;
+    const tmp_file = try profile_dir.createFile(io, "token.tmp", .{});
+    defer tmp_file.close(io);
     var buf: [1024]u8 = undefined;
-    var writer_f = tmp_file.writer(&buf);
+    var writer_f = tmp_file.writer(io, &buf);
     const writer = &writer_f.interface;
     const tokens = state.tokens.items;
 
@@ -239,5 +243,5 @@ fn updateTokensFile(state: *State) !void {
     try std.json.Stringify.value(tmp, .{ .whitespace = .indent_2 }, writer);
     try writer.writeAll("\n");
     try writer.flush();
-    try state.profile_dir.rename("token.tmp", "token");
+    try profile_dir.rename("token.tmp", profile_dir, "token", io);
 }
