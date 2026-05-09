@@ -29,6 +29,10 @@ pub const Client = struct {
         c.rid = token.rid.?;
         c.conn = conn.*;
         c.name = token.name;
+        c.online = true;
+        c.writer_mutex = .init;
+        c.active = .empty;
+        c.active_mutex = .init;
     }
 };
 
