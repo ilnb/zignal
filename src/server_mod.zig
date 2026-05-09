@@ -123,6 +123,8 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
             return;
         };
         try linkClients(client, c2, state);
+        errWriteAll(w, "\n", client) orelse return;
+        errFlush(w, client) orelse return;
     } else if (eql(u8, header, "UNLINK")) {
         try client.writer_mutex.lock(io);
         defer client.writer_mutex.unlock(io);
@@ -139,6 +141,8 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
             return;
         };
         try unlinkClients(client, c2, state);
+        errWriteAll(w, "\n", client) orelse return;
+        errFlush(w, client) orelse return;
     } else if (eql(u8, header, "SENDTO")) {
         var writer = client.conn.writer(io, &write_buf);
         const w = &writer.interface;
@@ -158,8 +162,18 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
             return;
         };
         try sendMsg(io, client, c2, to_send);
+        try client.writer_mutex.lock(io);
+        defer client.writer_mutex.unlock(io);
+        errWriteAll(w, "\n", client) orelse return;
+        errFlush(w, client) orelse return;
     } else if (eql(u8, header, "ALL")) {
         try sendAll(io, client, std.mem.trim(u8, itr.rest(), " \n"));
+        var writer = client.conn.writer(io, &write_buf);
+        const w = &writer.interface;
+        try client.writer_mutex.lock(io);
+        defer client.writer_mutex.unlock(io);
+        errWriteAll(w, "\n", client) orelse return;
+        errFlush(w, client) orelse return;
     } else if (eql(u8, header, "GETINFO")) {
         const buf = itr.next() orelse {
             try displayAll(client, state);
