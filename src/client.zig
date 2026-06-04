@@ -6,6 +6,7 @@ const File = Io.File;
 const posix = std.posix;
 const server_mod = @import("server");
 const utils = @import("utils");
+
 const UiState = @import("types").UiState;
 var ui = UiState{};
 const prompt = "➜ ";

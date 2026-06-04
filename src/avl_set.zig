@@ -289,7 +289,7 @@ pub fn Set(T: type) type {
         }
 
         pub fn format(
-            self: Self,
+            self: *const Self,
             wr: *std.Io.Writer,
         ) std.Io.Writer.Error!void {
             try printImpl(self.root, wr);

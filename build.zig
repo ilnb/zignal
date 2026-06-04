@@ -40,6 +40,7 @@ pub fn build(b: *std.Build) void {
 
     const server = b.addExecutable(.{
         .name = "server",
+        .use_lld = false,
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/server.zig"),
             .target = target,
@@ -65,6 +66,7 @@ pub fn build(b: *std.Build) void {
 
     const client = b.addExecutable(.{
         .name = "client",
+        .use_lld = false,
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/client.zig"),
             .target = target,
