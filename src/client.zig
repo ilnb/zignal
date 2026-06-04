@@ -216,7 +216,7 @@ fn timedWait(cond: *Io.Condition, mutex: *Io.Mutex, timeout_ms: i64) !void {
     }
 }
 
-fn recvFn(r: *Io.Reader, stdout: *Io.Writer) !void {
+fn recvFn(r: *Io.Reader, stdout: *Io.Writer) void {
     while (running.load(.acquire)) {
         const line = r.takeDelimiter('\n') catch {
             std.debug.print("{s}Server disconnected (Error)\n", .{line_clear});
@@ -232,7 +232,10 @@ fn recvFn(r: *Io.Reader, stdout: *Io.Writer) !void {
             break;
         };
 
-        try ui.mutex.lock(io);
+        ui.mutex.lock(io) catch |err| {
+            std.debug.print("Recv thread not able to take ui mutex. Err: {any}", .{err});
+            return;
+        };
         defer {
             ui.pending = false;
             ui.cond.signal(io);
