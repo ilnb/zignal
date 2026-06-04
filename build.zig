@@ -5,13 +5,13 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const avl = b.createModule(.{
-        .root_source_file = b.path("backend/avl_set.zig"),
+        .root_source_file = b.path("src/avl_set.zig"),
         .target = target,
         .optimize = optimize,
     });
 
     const types = b.createModule(.{
-        .root_source_file = b.path("backend/types.zig"),
+        .root_source_file = b.path("src/types.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{
@@ -20,7 +20,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const utils = b.createModule(.{
-        .root_source_file = b.path("backend/utils.zig"),
+        .root_source_file = b.path("src/utils.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{
@@ -29,7 +29,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const server_mod = b.createModule(.{
-        .root_source_file = b.path("backend/server_mod.zig"),
+        .root_source_file = b.path("src/server_mod.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{
@@ -41,7 +41,7 @@ pub fn build(b: *std.Build) void {
     const server = b.addExecutable(.{
         .name = "server",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("backend/server.zig"),
+            .root_source_file = b.path("src/server.zig"),
             .target = target,
             .optimize = optimize,
             .imports = &.{
@@ -54,7 +54,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const client_mod = b.createModule(.{
-        .root_source_file = b.path("backend/client_mod.zig"),
+        .root_source_file = b.path("src/client_mod.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{
@@ -66,7 +66,7 @@ pub fn build(b: *std.Build) void {
     const client = b.addExecutable(.{
         .name = "client",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("backend/client.zig"),
+            .root_source_file = b.path("src/client.zig"),
             .target = target,
             .optimize = optimize,
             .imports = &.{
