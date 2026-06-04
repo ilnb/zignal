@@ -82,7 +82,7 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(server);
 
-    const server_step = b.step("run_server", "Run the server");
+    const server_step = b.step("run server", "Run the server");
     const server_cmd = b.addRunArtifact(server);
     server_step.dependOn(&server_cmd.step);
     server_cmd.step.dependOn(b.getInstallStep());
@@ -91,7 +91,7 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(client);
 
-    const client_step = b.step("run_client", "Run the client");
+    const client_step = b.step("run client", "Run the client");
     const client_cmd = b.addRunArtifact(client);
     client_step.dependOn(&client_cmd.step);
     client_cmd.step.dependOn(b.getInstallStep());

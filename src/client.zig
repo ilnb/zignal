@@ -7,7 +7,13 @@ const posix = std.posix;
 const server_mod = @import("server");
 const utils = @import("utils");
 
-const UiState = @import("types").UiState;
+pub const UiState = struct {
+    mutex: Io.Mutex = .init,
+    cond: Io.Condition = .init,
+    prompt_vis: bool = false,
+    pending: bool = false,
+};
+
 var ui = UiState{};
 const prompt = "➜ ";
 const line_clear = "\r\x1b[2K";

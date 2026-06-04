@@ -12,13 +12,6 @@ pub const Token = struct {
     name: []u8,
 };
 
-pub const UiState = struct {
-    mutex: Mutex = .init,
-    cond: std.Io.Condition = .init,
-    prompt_vis: bool = false,
-    pending: bool = false,
-};
-
 pub const Client = struct {
     rid: usize,
     conn: net.Stream,
@@ -62,7 +55,7 @@ pub const Client = struct {
     }
 };
 
-pub const State = struct {
+pub const ServState = struct {
     clients: std.ArrayList(*Client),
     links: std.AutoHashMap(usize, Set(usize)),
     mutex: Mutex,
