@@ -8,7 +8,6 @@ const server_mod = @import("server");
 const utils = @import("utils");
 const UiState = @import("types").UiState;
 var ui = UiState{};
-
 const prompt = "➜ ";
 const line_clear = "\r\x1b[2K";
 

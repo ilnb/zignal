@@ -11,38 +11,17 @@ pub fn usizeCmp(a: usize, b: usize) std.math.Order {
     return std.math.order(a, b);
 }
 
-pub fn errWrite(w: *Writer, comptime fmt: []const u8, args: anytype, client: *Client) ?void {
-    w.print(fmt, args) catch |err| {
-        info("Write failed to {d}: {any}", .{ client.rid, err });
-        return null;
-    };
-}
-
-pub fn errWriteAll(w: *Writer, msg: []const u8, client: *Client) ?void {
-    w.writeAll(msg) catch |err| {
-        info("Write failed to {d}: {any}", .{ client.rid, err });
-        return null;
-    };
-}
-
-pub fn errFlush(w: *Writer, client: *Client) ?void {
-    w.flush() catch |err| {
-        info("Flush failed to {d}: {any}", .{ client.rid, err });
-        return null;
-    };
-}
-
-pub fn getClientById(buf: []const u8, state: *State) ?*Client {
+pub fn getClientById(state: *State, buf: []const u8) ?*Client {
     const id = std.fmt.parseInt(u8, buf, 10) catch return null;
     return for (state.clients.items) |c| {
         if (c.rid == id) break c;
-    } else return null;
+    } else null;
 }
 
-pub fn getClientByName(buf: []const u8, state: *State) ?*Client {
+pub fn getClientByName(state: *State, buf: []const u8) ?*Client {
     return for (state.clients.items) |c| {
         if (eql(u8, c.name, buf)) break c;
-    } else return null;
+    } else null;
 }
 
 pub fn getClientNameByToken(state: *State, token: *Token) ?[]u8 {

@@ -1,6 +1,9 @@
 const std = @import("std");
 const net = std.Io.net;
 const Mutex = std.Io.Mutex;
+const Writer = std.Io.Writer;
+const info = std.log.info;
+
 pub const Set = @import("avl").Set;
 
 pub const Token = struct {
@@ -26,13 +29,36 @@ pub const Client = struct {
     active_mutex: Mutex = .init,
 
     pub fn init(c: *Client, conn: *const net.Stream, token: *Token) void {
-        c.rid = token.rid.?;
-        c.conn = conn.*;
-        c.name = token.name;
-        c.online = true;
-        c.writer_mutex = .init;
-        c.active = .empty;
-        c.active_mutex = .init;
+        c.* = .{
+            .rid = token.rid.?,
+            .conn = conn.*,
+            .name = token.name,
+            .online = true,
+            .writer_mutex = .init,
+            .active = .empty,
+            .active_mutex = .init,
+        };
+    }
+
+    pub fn errWrite(c: *Client, w: *Writer, comptime fmt: []const u8, args: anytype) ?void {
+        w.print(fmt, args) catch |err| {
+            info("Write failed to {d}: {any}", .{ c.rid, err });
+            return null;
+        };
+    }
+
+    pub fn errWriteAll(c: *Client, w: *Writer, msg: []const u8) ?void {
+        w.writeAll(msg) catch |err| {
+            info("Write failed to {d}: {any}", .{ c.rid, err });
+            return null;
+        };
+    }
+
+    pub fn errFlush(c: *Client, w: *Writer) ?void {
+        w.flush() catch |err| {
+            info("Flush failed to {d}: {any}", .{ c.rid, err });
+            return null;
+        };
     }
 };
 
