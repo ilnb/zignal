@@ -13,6 +13,7 @@ const client_mod = @import("client");
 const utils = @import("utils");
 const getClientNameByToken = utils.getClientNameByToken;
 const checkLock = utils.checkLock;
+const sendInfo = types.ClientState.sendInfo;
 
 var running = std.atomic.Value(bool).init(true);
 
@@ -156,7 +157,7 @@ pub fn main(init: std.process.Init) !void {
             info("Handshake failed with client {f} with error {any}. Terminating connection", .{ conn.socket.address, err });
             var writer = conn.writer(io, &buf);
             const interface = &writer.interface;
-            try interface.print("{any}\n", .{err});
+            try interface.print("ERR: {any}\n", .{err});
             try interface.flush();
             conn.close(io);
             continue;
@@ -196,6 +197,10 @@ pub fn main(init: std.process.Init) !void {
                 }
             },
         }
+
+        var conn_writer = conn.writer(io, &buf);
+        const writer = &conn_writer.interface;
+        try sendInfo(client, writer, &state);
 
         _ = try std.Thread.spawn(.{}, client_mod.handleClient, .{ client, &state });
     }

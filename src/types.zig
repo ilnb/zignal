@@ -17,7 +17,7 @@ pub const ServState = struct {
     pub const Client = struct {
         rid: usize,
         conn: net.Stream,
-        name: []u8,
+        name: []u8, // non owning ref
         online: bool = true,
         writer_mutex: Mutex = .init,
         active: std.ArrayList(*Client) = .empty,
@@ -64,4 +64,25 @@ pub const ServState = struct {
     tokens: std.ArrayList(Token),
     ga: std.mem.Allocator,
     io: std.Io,
+};
+
+pub const ClientState = struct {
+    const Self = @This();
+    pub const Client = struct {
+        title: ?[]u8 = null,
+        rid: usize,
+    };
+    pub const Info = struct { rid: usize, name: []u8 };
+
+    clients: std.AutoHashMap(usize, *Self.Client),
+    input_bufs: std.AutoHashMap(usize, std.ArrayList(u8)),
+
+    pub fn sendInfo(client: *ServState.Client, w: *Writer, state: *ServState) !void {
+        const tmp = try state.ga.create(Info);
+        defer state.ga.destroy(tmp);
+        tmp.* = .{ .rid = client.rid, .name = client.name };
+        try std.json.Stringify.value(tmp, .{ .whitespace = .indent_2 }, w);
+        try w.writeAll("\n");
+        try w.flush();
+    }
 };
