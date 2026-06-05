@@ -495,9 +495,7 @@ pub fn handshakeWithClient(conn: net.Stream, state: *State) !HandshakeResult {
     const token_id = itr.next() orelse return error.BadHandshake;
 
     const idx: ?usize = for (state.tokens.items, 0..) |t, i| {
-        if (std.mem.eql(u8, t.id, token_id)) {
-            break i;
-        }
+        if (std.mem.eql(u8, t.id, token_id)) break i;
     } else null;
 
     if (idx != null) {
