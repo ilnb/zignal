@@ -175,16 +175,17 @@ pub fn main(init: std.process.Init) !void {
                 try state.clients.append(state.ga, client);
             },
             .existing => |idx| {
-                const token: *Token = @ptrCast(&state.tokens.items[idx]);
+                const token = &state.tokens.items[idx];
                 if (token.rid == null) {
                     token.rid = id;
                     id += 1;
                 }
-                const client_idx: usize = for (state.clients.items, 0..) |c, i| {
+
+                const client_idx: ?usize = for (state.clients.items, 0..) |c, i| {
                     if (c.rid == token.rid.?) break i;
-                } else std.math.maxInt(usize);
-                if (client_idx != std.math.maxInt(usize)) {
-                    client = state.clients.items[client_idx];
+                } else null;
+                if (client_idx) |cidx| {
+                    client = state.clients.items[cidx];
                     client.conn = conn;
                     client.online = true;
                 } else {
