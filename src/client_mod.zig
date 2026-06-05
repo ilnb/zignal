@@ -2,7 +2,7 @@ const std = @import("std");
 const net = std.Io.net;
 const bufPrint = std.fmt.bufPrint;
 const types = @import("types");
-const Client = types.Client;
+const SClient = types.ServState.Client;
 const utils = @import("utils");
 const checkLock = utils.checkLock;
 
