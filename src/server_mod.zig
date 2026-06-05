@@ -12,7 +12,7 @@ const getClientById = utils.getClientById;
 const getClientByName = utils.getClientByName;
 
 pub fn handleClient(client: *Client, state: *State) !void {
-    // defer cleanupClient(client, state);
+    // defer cleanupClient(client, state) catch {};
     defer client.online = false;
     const conn = client.conn;
     info("Accepted connection from {f}, {d}", .{ conn.socket.address, client.rid });
@@ -107,9 +107,9 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
         defer client.writer_mutex.unlock(io);
         var writer = client.conn.writer(io, &write_buf);
         const w = &writer.interface;
+        info("Named {d} -> {s}", .{ client.rid, name });
         client.errWriteAll(w, "\n") orelse return;
         client.errFlush(w) orelse return;
-        info("Named {d} -> {s}", .{ client.rid, name });
     } else if (eql(u8, header, "LINK")) {
         try client.writer_mutex.lock(io);
         defer client.writer_mutex.unlock(io);
@@ -445,6 +445,7 @@ fn cleanupClient(client: *Client, state: *State) !void {
     const id = client.rid;
     try state.mutex.lock(io);
     defer state.mutex.unlock(io);
+
     const clients = &state.clients;
     for (clients.items, 0..) |c, i| {
         if (c == client) {
@@ -467,6 +468,8 @@ fn cleanupClient(client: *Client, state: *State) !void {
             }
         }
     }
+
+    client.active.deinit(state.ga);
     client.conn.close(io);
     state.ga.destroy(client);
 }
