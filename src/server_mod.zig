@@ -125,6 +125,11 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
             client.errFlush(w) orelse return;
             return;
         };
+        if (client == c2) {
+            client.errWriteAll(w, "Self link.\n") orelse return;
+            client.errFlush(w) orelse return;
+            return;
+        }
         try linkClients(client, c2, state);
         client.errWriteAll(w, "\n") orelse return;
         client.errFlush(w) orelse return;
@@ -203,16 +208,6 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
 }
 
 fn linkClients(client1: *Client, client2: *Client, state: *State) !void {
-    if (client1 == client2) {
-        var buf: [20]u8 = undefined;
-        var writer = client1.conn.writer(state.io, &buf);
-        const w = &writer.interface;
-        try client1.writer_mutex.lock(state.io);
-        defer client1.writer_mutex.unlock(state.io);
-        client1.errWriteAll(w, "Self link.\n") orelse return;
-        client1.errFlush(w) orelse return;
-        return;
-    }
     const id1 = client1.rid;
     const id2 = client2.rid;
     const links = &state.links;
