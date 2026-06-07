@@ -35,6 +35,15 @@ pub const ServState = struct {
             };
         }
 
+        pub fn sendInfo(c: *Client, w: *Writer, state: *ServState) !void {
+            const tmp = try state.ga.create(ClientState.Info);
+            defer state.ga.destroy(tmp);
+            tmp.* = .{ .rid = c.rid, .name = c.name };
+            try std.json.Stringify.value(tmp, .{ .whitespace = .indent_2 }, w);
+            try w.writeAll("\n");
+            try w.flush();
+        }
+
         pub fn errWrite(c: *Client, w: *Writer, comptime fmt: []const u8, args: anytype) ?void {
             w.print(fmt, args) catch |err| {
                 info("Write failed to {d}: {any}", .{ c.rid, err });
@@ -76,13 +85,4 @@ pub const ClientState = struct {
 
     clients: std.AutoHashMap(usize, *Self.Client),
     input_bufs: std.AutoHashMap(usize, std.ArrayList(u8)),
-
-    pub fn sendInfo(client: *ServState.Client, w: *Writer, state: *ServState) !void {
-        const tmp = try state.ga.create(Info);
-        defer state.ga.destroy(tmp);
-        tmp.* = .{ .rid = client.rid, .name = client.name };
-        try std.json.Stringify.value(tmp, .{ .whitespace = .indent_2 }, w);
-        try w.writeAll("\n");
-        try w.flush();
-    }
 };

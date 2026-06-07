@@ -13,7 +13,7 @@ const client_mod = @import("client");
 const utils = @import("utils");
 const getClientNameByToken = utils.getClientNameByToken;
 const checkLock = utils.checkLock;
-const sendInfo = types.ClientState.sendInfo;
+const sendInfo = Client.sendInfo;
 
 var running = std.atomic.Value(bool).init(true);
 
@@ -200,7 +200,7 @@ pub fn main(init: std.process.Init) !void {
 
         var conn_writer = conn.writer(io, &buf);
         const writer = &conn_writer.interface;
-        try sendInfo(client, writer, &state);
+        try client.sendInfo(writer, &state);
 
         _ = try std.Thread.spawn(.{}, client_mod.handleClient, .{ client, &state });
     }
