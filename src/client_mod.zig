@@ -36,7 +36,12 @@ pub fn handshakeWithServer(init: *const std.process.Init, profile_dir: std.Io.Di
 
     var s_reader_file = s.reader(io, buf[80..]);
     const s_reader = &s_reader_file.interface;
-    const msg = try s_reader.takeDelimiter('\n') orelse return error.EndOfStream;
+
+    const slen = try s_reader.takeDelimiter(' ') orelse return error.ReadError;
+    const len = try std.fmt.parseInt(usize, slen, 10);
+    const msg = try s_reader.readAlloc(init.gpa, len);
+    defer init.gpa.free(msg);
+
     if (std.mem.eql(u8, "OK", msg)) return;
     return error.HandshakeFailed;
 }

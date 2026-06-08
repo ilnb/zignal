@@ -13,7 +13,7 @@ const client_mod = @import("client");
 const utils = @import("utils");
 const getClientNameByToken = utils.getClientNameByToken;
 const checkLock = utils.checkLock;
-const sendInfo = Client.sendInfo;
+const sendInitInfo = Client.sendInitInfo;
 
 var running = std.atomic.Value(bool).init(true);
 
@@ -24,8 +24,9 @@ pub fn handleSig(sig: posix.SIG) callconv(.c) void {
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
+    const iaa = init.arena.allocator();
     const ga = init.gpa;
-    const args = try init.minimal.args.toSlice(init.arena.allocator());
+    const args = try init.minimal.args.toSlice(iaa);
 
     var profile: []const u8 = "default";
     var port: u16 = 8000;
@@ -155,10 +156,12 @@ pub fn main(init: std.process.Init) !void {
 
         var result = client_mod.handshakeWithClient(conn, &state) catch |err| {
             info("Handshake failed with client {f} with error {any}. Terminating connection", .{ conn.socket.address, err });
-            var writer = conn.writer(io, &buf);
-            const interface = &writer.interface;
-            try interface.print("ERR: {any}\n", .{err});
-            try interface.flush();
+            var c_writer = conn.writer(io, &buf);
+            const w = &c_writer.interface;
+            const res = try std.fmt.allocPrint(ga, "ERR: {any}", .{err});
+            defer ga.free(res);
+            try w.print("{d} {s}", .{ res.len, res });
+            try w.flush();
             conn.close(io);
             continue;
         };
@@ -170,7 +173,7 @@ pub fn main(init: std.process.Init) !void {
                 token.rid = id;
                 id += 1;
                 client = try ga.create(Client);
-                client.init(&conn, token);
+                client.init(&conn, token, iaa);
                 try state.tokens.append(state.ga, token.*);
                 try state.links.put(token.rid.?, .init(state.ga, utils.usizeCmp));
                 try state.clients.append(state.ga, client);
@@ -191,7 +194,7 @@ pub fn main(init: std.process.Init) !void {
                     client.online = true;
                 } else {
                     client = try ga.create(Client);
-                    client.init(&conn, token);
+                    client.init(&conn, token, iaa);
                     try state.clients.append(state.ga, client);
                     try state.links.put(token.rid.?, .init(state.ga, utils.usizeCmp));
                 }
@@ -199,8 +202,8 @@ pub fn main(init: std.process.Init) !void {
         }
 
         var conn_writer = conn.writer(io, &buf);
-        const writer = &conn_writer.interface;
-        try client.sendInfo(writer, &state);
+        const w = &conn_writer.interface;
+        try client.sendInitInfo(w, state.ga);
 
         _ = try std.Thread.spawn(.{}, client_mod.handleClient, .{ client, &state });
     }

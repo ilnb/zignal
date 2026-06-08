@@ -2,7 +2,10 @@ const std = @import("std");
 const net = std.Io.net;
 const Mutex = std.Io.Mutex;
 const Writer = std.Io.Writer;
+const Allocator = std.mem.Allocator;
 const info = std.log.info;
+const AL = std.ArrayList;
+const HM = std.AutoHashMap;
 
 pub const Set = @import("avl").Set;
 
@@ -20,10 +23,11 @@ pub const ServState = struct {
         name: []u8, // non owning ref
         online: bool = true,
         writer_mutex: Mutex = .init,
-        active: std.ArrayList(*Client) = .empty,
+        active: AL(*Client) = .empty,
         active_mutex: Mutex = .init,
+        ga: Allocator,
 
-        pub fn init(c: *Client, conn: *const net.Stream, token: *Token) void {
+        pub fn init(c: *Client, conn: *const net.Stream, token: *Token, aa: Allocator) void {
             c.* = .{
                 .rid = token.rid.?,
                 .conn = conn.*,
@@ -32,27 +36,31 @@ pub const ServState = struct {
                 .writer_mutex = .init,
                 .active = .empty,
                 .active_mutex = .init,
+                .ga = aa,
             };
         }
 
-        pub fn sendInfo(c: *Client, w: *Writer, state: *ServState) !void {
-            const tmp = try state.ga.create(ClientState.Info);
-            defer state.ga.destroy(tmp);
+        pub fn sendInitInfo(c: *Client, w: *Writer, aa: Allocator) !void {
+            const tmp = try aa.create(ClientState.Info);
+            defer aa.destroy(tmp);
             tmp.* = .{ .rid = c.rid, .name = c.name };
-            try std.json.Stringify.value(tmp, .{ .whitespace = .indent_2 }, w);
-            try w.writeAll("\n");
-            try w.flush();
+            const msg = try std.json.Stringify.valueAlloc(aa, tmp, .{ .whitespace = .indent_2 });
+            defer aa.free(msg);
+            c.errWriteAll(w, msg) orelse return;
+            c.errFlush(w) orelse return;
         }
 
         pub fn errWrite(c: *Client, w: *Writer, comptime fmt: []const u8, args: anytype) ?void {
-            w.print(fmt, args) catch |err| {
+            const res = std.fmt.allocPrint(c.ga, fmt, args) catch |err| {
                 info("Write failed to {d}: {any}", .{ c.rid, err });
                 return null;
             };
+            defer c.ga.free(res);
+            c.errWriteAll(w, res) orelse return;
         }
 
         pub fn errWriteAll(c: *Client, w: *Writer, msg: []const u8) ?void {
-            w.writeAll(msg) catch |err| {
+            w.print("{d} {s}", .{ msg.len, msg }) catch |err| {
                 info("Write failed to {d}: {any}", .{ c.rid, err });
                 return null;
             };
@@ -66,23 +74,26 @@ pub const ServState = struct {
         }
     };
 
-    clients: std.ArrayList(*Client),
-    links: std.AutoHashMap(usize, Set(usize)),
+    clients: AL(*Client),
+    links: HM(usize, Set(usize)),
     mutex: Mutex,
     profile_dir: std.Io.Dir,
-    tokens: std.ArrayList(Token),
-    ga: std.mem.Allocator,
+    tokens: AL(Token),
+    ga: Allocator,
     io: std.Io,
 };
 
 pub const ClientState = struct {
     const Self = @This();
     pub const Client = struct {
-        title: ?[]u8 = null,
+        title: []u8,
         rid: usize,
+        msgs: AL(IdMessage),
+        input: AL(u8),
     };
     pub const Info = struct { rid: usize, name: []u8 };
+    pub const IdMessage = struct { rid: usize, buf: []u8 };
 
-    clients: std.AutoHashMap(usize, *Self.Client),
-    input_bufs: std.AutoHashMap(usize, std.ArrayList(u8)),
+    clients: AL(Self.Client),
+    ga: Allocator,
 };

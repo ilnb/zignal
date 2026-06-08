@@ -31,7 +31,8 @@ pub fn handleSig(sig: posix.SIG) callconv(.c) void {
 
 pub fn main(init: std.process.Init) !void {
     io = init.io;
-    const args = try init.minimal.args.toSlice(init.arena.allocator());
+    const aa = init.arena.allocator();
+    const args = try init.minimal.args.toSlice(aa);
 
     var profile: []const u8 = "default";
     var port: u16 = 8000;
@@ -127,7 +128,7 @@ pub fn main(init: std.process.Init) !void {
         return;
     };
 
-    const recv_thread = std.Thread.spawn(.{}, recvFn, .{ reader, stdout }) catch |err| {
+    const recv_thread = std.Thread.spawn(.{}, recvFn, .{ reader, stdout, aa }) catch |err| {
         std.debug.print("Error when trying to spawn thread: {any}\n", .{err});
         return;
     };
@@ -175,7 +176,7 @@ pub fn main(init: std.process.Init) !void {
             ui.pending = true;
             ui.mutex.unlock(io);
 
-            try writer.print("{s}\n", .{msg});
+            try writer.print("{d} {s}", .{ msg.len, msg });
             try writer.flush();
         } else {
             try ui.mutex.lock(io);
@@ -222,21 +223,30 @@ fn timedWait(cond: *Io.Condition, mutex: *Io.Mutex, timeout_ms: i64) !void {
     }
 }
 
-fn recvFn(r: *Io.Reader, stdout: *Io.Writer) void {
+fn recvFn(r: *Io.Reader, stdout: *Io.Writer, aa: std.mem.Allocator) !void {
     while (running.load(.acquire)) {
-        const line = r.takeDelimiter('\n') catch {
-            std.debug.print("{s}Server disconnected (Error)\n", .{line_clear});
+        const slen = r.takeDelimiter(' ') catch |err| {
+            std.debug.print("{s}Error when receiving: {any}\n", .{ line_clear, err });
             running.store(false, .release);
             ui.cond.signal(io);
             break;
         } orelse {
             if (running.load(.acquire)) {
-                std.debug.print("{s}Server disconnected (EOF)\n", .{line_clear});
+                std.debug.print("{s}EOF\n", .{line_clear});
                 running.store(false, .release);
                 ui.cond.signal(io);
             }
             break;
         };
+        const len = try std.fmt.parseInt(usize, slen, 10);
+
+        const line = r.readAlloc(aa, len) catch |err| {
+            std.debug.print("{s}Error when receiving: {any}\n", .{ line_clear, err });
+            running.store(false, .release);
+            ui.cond.signal(io);
+            break;
+        };
+        defer aa.free(line);
 
         ui.mutex.lock(io) catch |err| {
             std.debug.print("Recv thread not able to take ui mutex. Err: {any}", .{err});
