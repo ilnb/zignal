@@ -168,6 +168,8 @@ pub fn main(init: std.process.Init) !void {
 
         var client: *Client = undefined;
 
+        try state.mutex.lock(state.io);
+        defer state.mutex.unlock(state.io);
         switch (result) {
             .new => |*token| {
                 token.rid = id;
@@ -203,7 +205,26 @@ pub fn main(init: std.process.Init) !void {
 
         var conn_writer = conn.writer(io, &buf);
         const w = &conn_writer.interface;
-        try client.sendInitInfo(w, state.ga);
+        const msg = try client.makeInitInfo(state.ga);
+        defer state.ga.free(msg);
+        try client.sendInitInfo(w, msg);
+
+        for (state.clients.items) |c| {
+            if (c == client) {
+                @branchHint(.unlikely);
+                continue;
+            }
+            var fmsg: std.ArrayList(u8) = .empty;
+            defer fmsg.deinit(iaa);
+            try fmsg.appendSlice(iaa, "INFO: ");
+            try fmsg.appendSlice(iaa, msg);
+            try c.writer_mutex.lock(state.io);
+            defer c.writer_mutex.unlock(state.io);
+            var cwriter = c.conn.writer(io, &buf);
+            const cw = &cwriter.interface;
+            std.debug.print("sending info to {d}", .{c.rid});
+            try c.sendInitInfo(cw, fmsg.items);
+        }
 
         _ = try std.Thread.spawn(.{}, client_mod.handleClient, .{ client, &state });
     }

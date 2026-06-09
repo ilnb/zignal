@@ -40,12 +40,15 @@ pub const ServState = struct {
             };
         }
 
-        pub fn sendInitInfo(c: *Client, w: *Writer, aa: Allocator) !void {
+        pub fn makeInitInfo(c: *Client, aa: Allocator) ![]u8 {
             const tmp = try aa.create(ClientState.Info);
             defer aa.destroy(tmp);
             tmp.* = .{ .rid = c.rid, .name = c.name };
             const msg = try std.json.Stringify.valueAlloc(aa, tmp, .{ .whitespace = .indent_2 });
-            defer aa.free(msg);
+            return msg;
+        }
+
+        pub fn sendInitInfo(c: *Client, w: *Writer, msg: []const u8) !void {
             c.errWriteAll(w, msg) orelse return;
             c.errFlush(w) orelse return;
         }
