@@ -1,19 +1,3 @@
-const std = @import("std");
-const info = std.log.info;
-const Io = std.Io;
-const net = Io.net;
-const File = Io.File;
-const posix = std.posix;
-const server_mod = @import("server");
-const utils = @import("utils");
-
-pub const UiState = struct {
-    mutex: Io.Mutex = .init,
-    cond: Io.Condition = .init,
-    prompt_vis: bool = false,
-    pending: bool = false,
-};
-
 var ui = UiState{};
 const prompt = "➜ ";
 const line_clear = "\r\x1b[2K";
@@ -270,3 +254,19 @@ fn recvFn(r: *Io.Reader, stdout: *Io.Writer, aa: std.mem.Allocator) !void {
         stdout.flush() catch return;
     }
 }
+
+const std = @import("std");
+const info = std.log.info;
+const Io = std.Io;
+const net = Io.net;
+const File = Io.File;
+const posix = std.posix;
+const server_mod = @import("server");
+const utils = @import("utils");
+
+pub const UiState = struct {
+    mutex: Io.Mutex = .init,
+    cond: Io.Condition = .init,
+    prompt_vis: bool = false,
+    pending: bool = false,
+};

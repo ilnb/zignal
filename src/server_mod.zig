@@ -1,17 +1,3 @@
-const std = @import("std");
-const eql = std.mem.eql;
-const info = std.log.info;
-const net = std.Io.net;
-const types = @import("types");
-const State = types.ServState;
-const Client = State.Client;
-const Token = types.Token;
-const utils = @import("utils");
-const bufPrint = std.fmt.bufPrint;
-const allocPrint = std.fmt.allocPrint;
-const getClientById = utils.getClientById;
-const getClientByName = utils.getClientByName;
-
 pub fn handleClient(client: *Client, state: *State) !void {
     // defer cleanupClient(client, state) catch {};
     defer client.online = false;
@@ -541,3 +527,17 @@ pub fn handshakeWithClient(conn: net.Stream, state: *State) !HandshakeResult {
         return .{ .new = Token{ .id = try state.ga.dupe(u8, token_id), .name = try state.ga.dupe(u8, "NA") } };
     }
 }
+
+const std = @import("std");
+const eql = std.mem.eql;
+const info = std.log.info;
+const net = std.Io.net;
+const types = @import("types");
+const State = types.ServState;
+const Client = State.Client;
+const Token = types.Token;
+const utils = @import("utils");
+const bufPrint = std.fmt.bufPrint;
+const allocPrint = std.fmt.allocPrint;
+const getClientById = utils.getClientById;
+const getClientByName = utils.getClientByName;

@@ -1,12 +1,3 @@
-const std = @import("std");
-const eql = std.mem.eql;
-const info = std.log.info;
-const Writer = std.Io.Writer;
-const types = @import("types");
-const ServState = types.ServState;
-const SClient = ServState.Client;
-const Token = types.Token;
-
 pub fn usizeCmp(a: usize, b: usize) std.math.Order {
     return std.math.order(a, b);
 }
@@ -50,3 +41,12 @@ pub fn checkLock(io: std.Io, profile_dir: *std.Io.Dir) !void {
     std.debug.print("Another instance is running.\n", .{});
     return error.InstancePresent;
 }
+
+const std = @import("std");
+const eql = std.mem.eql;
+const info = std.log.info;
+const Writer = std.Io.Writer;
+const types = @import("types");
+const ServState = types.ServState;
+const SClient = ServState.Client;
+const Token = types.Token;

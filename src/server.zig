@@ -1,20 +1,3 @@
-const std = @import("std");
-const net = std.Io.net;
-const posix = std.posix;
-const linux = std.os.linux;
-const bufPrint = std.fmt.bufPrint;
-const info = std.log.info;
-const types = @import("types");
-const State = types.ServState;
-const Client = State.Client;
-const Token = types.Token;
-const Set = types.Set;
-const client_mod = @import("client");
-const utils = @import("utils");
-const getClientNameByToken = utils.getClientNameByToken;
-const checkLock = utils.checkLock;
-const sendInitInfo = Client.sendInitInfo;
-
 var running = std.atomic.Value(bool).init(true);
 
 pub fn handleSig(sig: posix.SIG) callconv(.c) void {
@@ -281,3 +264,20 @@ fn updateTokensFile(state: *State) !void {
     try writer.flush();
     try profile_dir.rename("token.tmp", profile_dir, "token", io);
 }
+
+const std = @import("std");
+const net = std.Io.net;
+const posix = std.posix;
+const linux = std.os.linux;
+const bufPrint = std.fmt.bufPrint;
+const info = std.log.info;
+const types = @import("types");
+const State = types.ServState;
+const Client = State.Client;
+const Token = types.Token;
+const Set = types.Set;
+const client_mod = @import("client");
+const utils = @import("utils");
+const getClientNameByToken = utils.getClientNameByToken;
+const checkLock = utils.checkLock;
+const sendInitInfo = Client.sendInitInfo;

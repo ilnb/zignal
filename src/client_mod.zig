@@ -1,11 +1,3 @@
-const std = @import("std");
-const net = std.Io.net;
-const bufPrint = std.fmt.bufPrint;
-const types = @import("types");
-const SClient = types.ServState.Client;
-const utils = @import("utils");
-const checkLock = utils.checkLock;
-
 pub fn handshakeWithServer(init: *const std.process.Init, profile_dir: std.Io.Dir, s: *net.Stream) !void {
     const io = init.io;
     var buf: [1024]u8 = undefined;
@@ -56,3 +48,11 @@ fn createToken(token_file: std.fs.File) !void {
     try writer.writeAll(&hex);
     try writer.flush();
 }
+
+const std = @import("std");
+const net = std.Io.net;
+const bufPrint = std.fmt.bufPrint;
+const types = @import("types");
+const SClient = types.ServState.Client;
+const utils = @import("utils");
+const checkLock = utils.checkLock;

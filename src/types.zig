@@ -1,12 +1,3 @@
-const std = @import("std");
-const net = std.Io.net;
-const Mutex = std.Io.Mutex;
-const Writer = std.Io.Writer;
-const Allocator = std.mem.Allocator;
-const info = std.log.info;
-const AL = std.ArrayList;
-const HM = std.AutoHashMap;
-
 pub const Set = @import("avl").Set;
 
 pub const Token = struct {
@@ -100,3 +91,12 @@ pub const ClientState = struct {
     clients: AL(Self.Client),
     ga: Allocator,
 };
+
+const std = @import("std");
+const net = std.Io.net;
+const Mutex = std.Io.Mutex;
+const Writer = std.Io.Writer;
+const Allocator = std.mem.Allocator;
+const info = std.log.info;
+const AL = std.ArrayList;
+const HM = std.AutoHashMap;
