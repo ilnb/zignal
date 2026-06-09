@@ -3,6 +3,7 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const gstep = b.getInstallStep();
 
     const avl = b.createModule(.{
         .root_source_file = b.path("src/avl_set.zig"),
@@ -53,6 +54,13 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+    const server_install = b.addInstallArtifact(server, .{});
+    gstep.dependOn(&server_install.step);
+    const server_step = b.step("run-server", "Run the server");
+    const server_cmd = b.addRunArtifact(server);
+    server_step.dependOn(&server_cmd.step);
+    server_cmd.step.dependOn(&server_install.step);
+    if (b.args) |args| server_cmd.addArgs(args);
 
     const client_mod = b.createModule(.{
         .root_source_file = b.path("src/client_mod.zig"),
@@ -79,22 +87,11 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
-
-    b.installArtifact(server);
-
-    const server_step = b.step("run server", "Run the server");
-    const server_cmd = b.addRunArtifact(server);
-    server_step.dependOn(&server_cmd.step);
-    server_cmd.step.dependOn(b.getInstallStep());
-
-    if (b.args) |args| server_cmd.addArgs(args);
-
-    b.installArtifact(client);
-
-    const client_step = b.step("run client", "Run the client");
+    const client_install = b.addInstallArtifact(client, .{});
+    gstep.dependOn(&client_install.step);
+    const client_step = b.step("run-client", "Run the client");
     const client_cmd = b.addRunArtifact(client);
     client_step.dependOn(&client_cmd.step);
-    client_cmd.step.dependOn(b.getInstallStep());
-
+    client_cmd.step.dependOn(&client_install.step);
     if (b.args) |args| client_cmd.addArgs(args);
 }
