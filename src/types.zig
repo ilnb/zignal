@@ -71,15 +71,16 @@ pub const ServState = struct {
     clients: AL(*Client),
     links: HM(usize, Set(usize)),
     mutex: Mutex,
-    profile_dir: std.Io.Dir,
+    profile_dir: Io.Dir,
     tokens: AL(Token),
     ga: Allocator,
-    io: std.Io,
+    io: Io,
 };
 
 pub const ClientState = struct {
     const Self = @This();
     pub const Client = struct {
+        connected: bool,
         title: []u8,
         rid: usize,
         msgs: AL(IdMessage),
@@ -88,14 +89,18 @@ pub const ClientState = struct {
     pub const Info = struct { rid: usize, name: []u8 };
     pub const IdMessage = struct { rid: usize, buf: []u8 };
 
-    clients: AL(Self.Client),
+    curr_user: ?usize = null,
+    clients: AL(Self.Client) = .empty,
+    clients_mutex: Mutex = .init,
     ga: Allocator,
+    io: Io,
 };
 
 const std = @import("std");
-const net = std.Io.net;
-const Mutex = std.Io.Mutex;
-const Writer = std.Io.Writer;
+const Io = std.Io;
+const net = Io.net;
+const Mutex = Io.Mutex;
+const Writer = Io.Writer;
 const Allocator = std.mem.Allocator;
 const info = std.log.info;
 const AL = std.ArrayList;
