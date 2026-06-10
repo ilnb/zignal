@@ -18,8 +18,8 @@ pub const ServState = struct {
         active_mutex: Mutex = .init,
         ga: Allocator,
 
-        pub fn init(c: *Client, conn: *const net.Stream, token: *Token, aa: Allocator) void {
-            c.* = .{
+        pub fn init(self: *Client, conn: *const net.Stream, token: *Token, aa: Allocator) void {
+            self.* = .{
                 .rid = token.rid.?,
                 .conn = conn.*,
                 .name = token.name,
@@ -31,48 +31,48 @@ pub const ServState = struct {
             };
         }
 
-        pub fn makeInitInfo(c: *Client, aa: Allocator) ![]u8 {
+        pub fn makeInitInfo(self: *Client, aa: Allocator) ![]u8 {
             const tmp = try aa.create(ClientState.Info);
             defer aa.destroy(tmp);
-            tmp.* = .{ .rid = c.rid, .name = c.name };
+            tmp.* = .{ .rid = self.rid, .name = self.name };
             const msg = try std.json.Stringify.valueAlloc(aa, tmp, .{ .whitespace = .indent_2 });
             return msg;
         }
 
-        pub fn sendInitInfo(c: *Client, w: *Writer, msg: []const u8) !void {
-            c.errWriteAll(w, msg) orelse return;
-            c.errFlush(w) orelse return;
+        pub fn sendInitInfo(self: *Client, w: *Writer, msg: []const u8) !void {
+            self.errWriteAll(w, msg) orelse return;
+            self.errFlush(w) orelse return;
         }
 
-        pub fn errWrite(c: *Client, w: *Writer, comptime fmt: []const u8, args: anytype) ?void {
-            const res = std.fmt.allocPrint(c.ga, fmt, args) catch |err| {
-                info("Write failed to {d}: {any}", .{ c.rid, err });
+        pub fn errWrite(self: *Client, w: *Writer, comptime fmt: []const u8, args: anytype) ?void {
+            const res = std.fmt.allocPrint(self.ga, fmt, args) catch |err| {
+                info("Write failed to {d}: {any}", .{ self.rid, err });
                 return null;
             };
-            defer c.ga.free(res);
-            c.errWriteAll(w, res) orelse return;
+            defer self.ga.free(res);
+            self.errWriteAll(w, res) orelse return;
         }
 
-        pub fn errWriteAll(c: *Client, w: *Writer, msg: []const u8) ?void {
+        pub fn errWriteAll(self: *Client, w: *Writer, msg: []const u8) ?void {
             w.print("{d} {s}", .{ msg.len, msg }) catch |err| {
-                info("Write failed to {d}: {any}", .{ c.rid, err });
+                info("Write failed to {d}: {any}", .{ self.rid, err });
                 return null;
             };
         }
 
-        pub fn errFlush(c: *Client, w: *Writer) ?void {
+        pub fn errFlush(self: *Client, w: *Writer) ?void {
             w.flush() catch |err| {
-                info("Flush failed to {d}: {any}", .{ c.rid, err });
+                info("Flush failed to {d}: {any}", .{ self.rid, err });
                 return null;
             };
         }
     };
 
-    clients: AL(*Client),
+    clients: AL(*Client) = .empty,
     links: HM(usize, Set(usize)),
-    mutex: Mutex,
+    mutex: Mutex = .init,
     profile_dir: Io.Dir,
-    tokens: AL(Token),
+    tokens: AL(Token) = .empty,
     ga: Allocator,
     io: Io,
 
