@@ -75,6 +75,26 @@ pub const ServState = struct {
     tokens: AL(Token),
     ga: Allocator,
     io: Io,
+
+    pub fn deinit(self: *Self) void {
+        const aa = self.ga;
+        const tokens = &self.tokens;
+        const clients = &self.clients;
+        const links = &self.links;
+        for (tokens.items) |token| {
+            aa.free(token.id);
+            aa.free(token.name);
+        }
+        for (clients.items) |c| {
+            c.active.deinit(aa);
+            aa.destroy(c);
+        }
+        tokens.deinit(aa);
+        clients.deinit(aa);
+        var itr = links.iterator();
+        while (itr.next()) |e| e.value_ptr.deinit();
+        links.deinit();
+    }
 };
 
 pub const ClientState = struct {

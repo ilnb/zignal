@@ -80,33 +80,12 @@ pub fn main(init: std.process.Init) !void {
     info("Server listening on port {d}", .{port});
 
     var state = State{
-        .clients = .empty,
         .links = std.AutoHashMap(usize, Set(usize)).init(ga),
         .ga = ga,
         .io = io,
-        .mutex = .init,
-        .tokens = .empty,
         .profile_dir = profile_dir,
     };
-    defer {
-        const aa = state.ga;
-        const tokens = &state.tokens;
-        const clients = &state.clients;
-        const links = &state.links;
-        for (tokens.items) |token| {
-            aa.free(token.id);
-            aa.free(token.name);
-        }
-        for (clients.items) |c| {
-            c.active.deinit(ga);
-            aa.destroy(c);
-        }
-        tokens.deinit(ga);
-        clients.deinit(ga);
-        var itr = links.iterator();
-        while (itr.next()) |e| e.value_ptr.deinit();
-        links.deinit();
-    }
+    defer state.deinit();
 
     try populateTokens(&state);
 
