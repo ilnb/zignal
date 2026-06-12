@@ -109,11 +109,23 @@ pub const ClientState = struct {
     pub const Info = struct { rid: usize, name: []u8 };
     pub const IdMessage = struct { rid: usize, buf: []u8 };
 
-    curr_user: ?usize = null,
+    name: ?[]u8 = null,
     clients: AL(Self.Client) = .empty,
     clients_mutex: Mutex = .init,
     ga: Allocator,
     io: Io,
+
+    pub fn deinit(self: *Self) void {
+        const aa = self.ga;
+        if (self.name) |name| aa.free(name);
+        for (self.clients.items) |*c| {
+            aa.free(c.title);
+            for (c.msgs.items) |*msg| aa.free(msg.buf);
+            c.msgs.deinit(aa);
+            c.input.deinit(aa);
+        }
+        self.clients.deinit(aa);
+    }
 };
 
 const std = @import("std");

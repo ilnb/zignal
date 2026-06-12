@@ -62,9 +62,9 @@ pub fn main(init: std.process.Init) !void {
 
     checkLock(init.io, &profile_dir) catch |err| {
         if (err != error.EndOfStream) {
-            std.debug.print("Lock check failed with error: {any}", .{err});
-            return;
+            std.debug.print("Lock check failed with error: {any}\n", .{err});
         }
+        return;
     };
     const lock_file = try profile_dir.createFile(io, "lock", .{});
     defer lock_file.close(io);

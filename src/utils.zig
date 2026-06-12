@@ -38,7 +38,6 @@ pub fn checkLock(io: std.Io, profile_dir: *std.Io.Dir) !void {
         return err;
     };
 
-    std.debug.print("Another instance is running.\n", .{});
     return error.InstancePresent;
 }
 

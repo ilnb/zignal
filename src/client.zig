@@ -8,7 +8,7 @@ var io: Io = undefined;
 
 pub fn handleSig(sig: posix.SIG) callconv(.c) void {
     _ = sig;
-    if (!running.swap(false, .acq_rel)) return;
+    running.store(false, .release);
     stream.shutdown(io, .recv) catch {};
     File.stdin().close(io);
 }
@@ -68,9 +68,9 @@ pub fn main(init: std.process.Init) !void {
 
     utils.checkLock(init.io, &profile_dir) catch |err| {
         if (err != error.EndOfStream) {
-            std.debug.print("Lock check failed with error: {any}", .{err});
-            return;
+            std.debug.print("Lock check failed with error: {any}\n", .{err});
         }
+        return;
     };
     const lock_file = try profile_dir.createFile(io, "lock", .{});
     defer profile_dir.deleteFile(io, "lock") catch {};
