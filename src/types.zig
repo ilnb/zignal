@@ -6,6 +6,47 @@ pub const Token = struct {
     name: []u8,
 };
 
+pub const PacketType = enum {
+    echo,
+    init,
+    name,
+    new_user,
+    link,
+    msg,
+    users,
+    to_get,
+    err,
+};
+
+pub const Packet = struct {
+    const Info = ClientState.Info;
+    pub const Infos = struct {
+        rid: usize,
+        name: []u8,
+        links: AL(usize),
+    };
+    pub const Data = union(PacketType) {
+        echo: []const u8,
+        init: []u8,
+        name: []u8,
+        new_user: Info,
+        link: struct {
+            with: usize,
+            invert: bool = false,
+        },
+        msg: struct {
+            to: ?usize = null,
+            buf: []u8,
+        },
+        users: AL(Infos),
+        to_get: AL(usize),
+        err: []u8,
+    };
+
+    rid: usize,
+    data: Data,
+};
+
 pub const ServState = struct {
     const Self = @This();
     pub const Client = struct {
@@ -39,12 +80,7 @@ pub const ServState = struct {
             return msg;
         }
 
-        pub fn sendInitInfo(self: *Client, w: *Writer, msg: []const u8) !void {
-            self.errWriteAll(w, msg) orelse return;
-            self.errFlush(w) orelse return;
-        }
-
-        pub fn errWrite(self: *Client, w: *Writer, comptime fmt: []const u8, args: anytype) ?void {
+        pub inline fn errWrite(self: *Client, w: *Writer, comptime fmt: []const u8, args: anytype) ?void {
             const res = std.fmt.allocPrint(self.ga, fmt, args) catch |err| {
                 info("Write failed to {d}: {any}", .{ self.rid, err });
                 return null;
@@ -53,14 +89,14 @@ pub const ServState = struct {
             self.errWriteAll(w, res) orelse return;
         }
 
-        pub fn errWriteAll(self: *Client, w: *Writer, msg: []const u8) ?void {
+        pub inline fn errWriteAll(self: *Client, w: *Writer, msg: []const u8) ?void {
             w.print("{d} {s}", .{ msg.len, msg }) catch |err| {
                 info("Write failed to {d}: {any}", .{ self.rid, err });
                 return null;
             };
         }
 
-        pub fn errFlush(self: *Client, w: *Writer) ?void {
+        pub inline fn errFlush(self: *Client, w: *Writer) ?void {
             w.flush() catch |err| {
                 info("Flush failed to {d}: {any}", .{ self.rid, err });
                 return null;
@@ -74,6 +110,7 @@ pub const ServState = struct {
     profile_dir: Io.Dir,
     tokens: AL(Token) = .empty,
     ga: Allocator,
+    aa: Allocator,
     io: Io,
 
     pub fn deinit(self: *Self) void {
@@ -103,11 +140,11 @@ pub const ClientState = struct {
         connected: bool,
         title: []u8,
         rid: usize,
-        msgs: AL(IdMessage),
+        msgs: AL(Msg),
         input: AL(u8),
     };
     pub const Info = struct { rid: usize, name: []u8 };
-    pub const IdMessage = struct { rid: usize, buf: []u8 };
+    pub const Msg = struct { rid: usize, buf: []u8 };
 
     name: ?[]u8 = null,
     clients: AL(Self.Client) = .empty,

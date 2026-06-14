@@ -2,22 +2,16 @@ pub fn usizeCmp(a: usize, b: usize) std.math.Order {
     return std.math.order(a, b);
 }
 
-pub fn getClientById(state: *ServState, buf: []const u8) ?*SClient {
+pub fn getClientById(state: *ServState, buf: []const u8) ?usize {
     const id = std.fmt.parseInt(u8, buf, 10) catch return null;
-    return for (state.clients.items) |c| {
-        if (c.rid == id) break c;
+    return for (state.clients.items, 0..) |c, i| {
+        if (c.rid == id) break i;
     } else null;
 }
 
-pub fn getClientByName(state: *ServState, buf: []const u8) ?*SClient {
-    return for (state.clients.items) |c| {
-        if (eql(u8, c.name, buf)) break c;
-    } else null;
-}
-
-pub fn getClientNameByToken(state: *ServState, token: *Token) ?[]u8 {
-    return for (state.tokens.items) |t| {
-        if (t.id == token.id) break token.name;
+pub fn getClientByName(state: *ServState, buf: []const u8) ?usize {
+    return for (state.clients.items, 0..) |c, i| {
+        if (eql(u8, c.name, buf)) break i;
     } else null;
 }
 

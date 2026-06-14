@@ -82,6 +82,7 @@ pub fn main(init: std.process.Init) !void {
     var state = State{
         .links = std.AutoHashMap(usize, Set(usize)).init(ga),
         .ga = ga,
+        .aa = iaa,
         .io = io,
         .profile_dir = profile_dir,
     };
@@ -118,10 +119,10 @@ pub fn main(init: std.process.Init) !void {
 
         var result = client_mod.handshakeWithClient(conn, &state) catch |err| {
             info("Handshake failed with client {f} with error {any}. Terminating connection", .{ conn.socket.address, err });
-            var c_writer = conn.writer(io, &buf);
-            const w = &c_writer.interface;
             const res = try std.fmt.allocPrint(ga, "ERR: {any}", .{err});
             defer ga.free(res);
+            var c_writer = conn.writer(io, &buf);
+            const w = &c_writer.interface;
             try w.print("{d} {s}", .{ res.len, res });
             try w.flush();
             conn.close(io);
@@ -130,8 +131,8 @@ pub fn main(init: std.process.Init) !void {
 
         var client: *Client = undefined;
 
-        try state.mutex.lock(state.io);
-        defer state.mutex.unlock(state.io);
+        try state.mutex.lock(io);
+        defer state.mutex.unlock(io);
         switch (result) {
             .new => |*token| {
                 token.rid = id;
@@ -167,25 +168,36 @@ pub fn main(init: std.process.Init) !void {
 
         var conn_writer = conn.writer(io, &buf);
         const w = &conn_writer.interface;
-        const msg = try client.makeInitInfo(state.ga);
-        defer state.ga.free(msg);
-        try client.sendInitInfo(w, msg);
+        const init_pkt = try std.json.Stringify.valueAlloc(state.ga, Packet{
+            .rid = client.rid,
+            .data = .{ .init = client.name },
+        }, .{ .whitespace = .indent_2 });
+        defer ga.free(init_pkt);
+        client.errWriteAll(w, init_pkt) orelse {
+            client.online = false;
+            continue;
+        };
+        client.errFlush(w) orelse {
+            client.online = false;
+            continue;
+        };
 
         for (state.clients.items) |c| {
             if (c == client) {
                 @branchHint(.unlikely);
                 continue;
             }
-            var fmsg: std.ArrayList(u8) = .empty;
-            defer fmsg.deinit(iaa);
-            try fmsg.appendSlice(iaa, "INFO: ");
-            try fmsg.appendSlice(iaa, msg);
-            try c.writer_mutex.lock(state.io);
-            defer c.writer_mutex.unlock(state.io);
+            const new_user = try std.json.Stringify.valueAlloc(state.ga, Packet{
+                .rid = c.rid,
+                .data = .{ .new_user = .{ .rid = client.rid, .name = client.name } },
+            }, .{ .whitespace = .indent_2 });
+            defer ga.free(new_user);
+            try c.writer_mutex.lock(io);
+            defer c.writer_mutex.unlock(io);
             var cwriter = c.conn.writer(io, &buf);
             const cw = &cwriter.interface;
-            std.debug.print("sending info to {d}", .{c.rid});
-            try c.sendInitInfo(cw, fmsg.items);
+            c.errWriteAll(cw, new_user) orelse continue;
+            c.errFlush(cw) orelse continue;
         }
 
         _ = try std.Thread.spawn(.{}, client_mod.handleClient, .{ client, &state });
@@ -255,8 +267,8 @@ const State = types.ServState;
 const Client = State.Client;
 const Token = types.Token;
 const Set = types.Set;
+const Packet = types.Packet;
+const PacketType = types.PacketType;
 const client_mod = @import("client");
 const utils = @import("utils");
-const getClientNameByToken = utils.getClientNameByToken;
 const checkLock = utils.checkLock;
-const sendInitInfo = Client.sendInitInfo;

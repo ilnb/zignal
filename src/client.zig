@@ -263,6 +263,9 @@ const File = Io.File;
 const posix = std.posix;
 const server_mod = @import("server");
 const utils = @import("utils");
+const types = @import("types");
+const Packet = types.Packet;
+const PacketType = types.PacketType;
 
 pub const UiState = struct {
     mutex: Io.Mutex = .init,
