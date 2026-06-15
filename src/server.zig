@@ -209,7 +209,7 @@ pub fn main(init: std.process.Init) !void {
 fn populateTokens(state: *State) !void {
     const io = state.io;
     var buf: [1024]u8 = undefined;
-    const token_file = try state.profile_dir.createFile(io, "token", .{ .truncate = false, .read = true });
+    const token_file = try state.profile_dir.createFile(io, "tokens.json", .{ .truncate = false, .read = true });
     defer token_file.close(io);
     var token_file_r = token_file.reader(io, &buf);
     const reader = &token_file_r.interface;
@@ -236,7 +236,7 @@ fn populateTokens(state: *State) !void {
 fn updateTokensFile(state: *State) !void {
     const io = state.io;
     const profile_dir = state.profile_dir;
-    const tmp_file = try profile_dir.createFile(io, "token.tmp", .{});
+    const tmp_file = try profile_dir.createFile(io, "tokens.json.tmp", .{});
     defer tmp_file.close(io);
     var buf: [1024]u8 = undefined;
     var writer_f = tmp_file.writer(io, &buf);
@@ -253,7 +253,7 @@ fn updateTokensFile(state: *State) !void {
     try std.json.Stringify.value(tmp, .{ .whitespace = .indent_2 }, writer);
     try writer.writeAll("\n");
     try writer.flush();
-    try profile_dir.rename("token.tmp", profile_dir, "token", io);
+    try profile_dir.rename("tokens.json.tmp", profile_dir, "tokens.json", io);
 }
 
 const std = @import("std");
