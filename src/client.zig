@@ -107,12 +107,17 @@ pub fn main(init: std.process.Init) !void {
     posix.sigaction(posix.SIG.INT, &sa, null);
     posix.sigaction(posix.SIG.HUP, &sa, null);
 
-    server_mod.handshakeWithServer(&init, profile_dir, &stream) catch |err| {
+    client_mod.handshakeWithServer(&init, profile_dir, &stream) catch |err| {
         std.debug.print("Handshake failed with {any}.\n", .{err});
         return;
     };
 
-    const recv_thread = std.Thread.spawn(.{}, recvFn, .{ reader, stdout, aa }) catch |err| {
+    var state: State = .{
+        .aa = aa,
+        .io = io,
+    };
+
+    const recv_thread = std.Thread.spawn(.{}, recvFn, .{ reader, stdout, &state }) catch |err| {
         std.debug.print("Error when trying to spawn thread: {any}\n", .{err});
         return;
     };
@@ -155,16 +160,55 @@ pub fn main(init: std.process.Init) !void {
         };
 
         if (msg.len > 0) {
-            try ui.mutex.lock(io);
-            ui.prompt_vis = false;
-            ui.pending = true;
-            ui.mutex.unlock(io);
+            if (try client_mod.parsePacket(&state, msg)) |packet| {
+                if (packet.data == .err) {
+                    try ui.mutex.lock(io);
+                    ui.prompt_vis = true;
+                    try stdout.print("{s}Local error: {s}\n{s}", .{ line_clear, packet.data.err, prompt });
+                    try stdout.flush();
+                    ui.mutex.unlock(io);
+                } else {
+                    try ui.mutex.lock(io);
+                    ui.prompt_vis = false;
+                    ui.pending = true;
+                    ui.mutex.unlock(io);
 
-            try writer.print("{d} {s}", .{ msg.len, msg });
-            try writer.flush();
+                    const to_send = try Stringify.valueAlloc(state.aa, packet, .{ .whitespace = .indent_2 });
+                    defer state.aa.free(to_send);
+
+                    try writer.print("{d} {s}", .{ to_send.len, to_send });
+                    try writer.flush();
+                }
+
+                switch (packet.data) {
+                    .echo, .name, .err => |p| {
+                        state.aa.free(p);
+                    },
+                    .link => |p| {
+                        state.aa.free(p.with);
+                    },
+                    .msg => |p| {
+                        state.aa.free(p.buf);
+                    },
+                    .to_get => |p| {
+                        if (p.len == 0) continue;
+                        for (p) |sl| state.aa.free(sl);
+                        state.aa.free(p);
+                    },
+                    else => unreachable,
+                }
+            } else {
+                try ui.mutex.lock(io);
+                ui.prompt_vis = true;
+                try stdout.print("{s}{s}", .{ line_clear, prompt });
+                try stdout.flush();
+                ui.mutex.unlock(io);
+            }
         } else {
             try ui.mutex.lock(io);
-            ui.prompt_vis = false;
+            ui.prompt_vis = true;
+            try stdout.print("{s}{s}", .{ line_clear, prompt });
+            try stdout.flush();
             ui.mutex.unlock(io);
         }
     }
@@ -207,7 +251,8 @@ fn timedWait(cond: *Io.Condition, mutex: *Io.Mutex, timeout_ms: i64) !void {
     }
 }
 
-fn recvFn(r: *Io.Reader, stdout: *Io.Writer, aa: std.mem.Allocator) !void {
+fn recvFn(r: *Io.Reader, stdout: *Io.Writer, state: *State) !void {
+    const aa = state.aa;
     while (running.load(.acquire)) {
         const slen = r.takeDelimiter(' ') catch |err| {
             std.debug.print("{s}Error when receiving: {any}\n", .{ line_clear, err });
@@ -241,18 +286,69 @@ fn recvFn(r: *Io.Reader, stdout: *Io.Writer, aa: std.mem.Allocator) !void {
             ui.cond.signal(io);
             ui.mutex.unlock(io);
         }
-
         if (line.len == 0) {
             if (ui.prompt_vis) {
-                stdout.print("{s}{s}", .{ line_clear, prompt }) catch return;
+                try stdout.print("{s}{s}", .{ line_clear, prompt });
             }
-        } else if (ui.prompt_vis) {
-            stdout.print("{s}{s}\n{s}", .{ line_clear, line, prompt }) catch return;
-        } else {
-            stdout.print("{s}\n", .{line}) catch return;
+            continue;
         }
-        stdout.flush() catch return;
+
+        const parsed_pkt = try std.json.parseFromSlice(Packet, aa, line, .{});
+        const parsed_value = parsed_pkt.value;
+        defer parsed_pkt.deinit();
+
+        switch (parsed_value.data) {
+            .echo => |p| {
+                if (p.len == 0) {
+                    if (ui.prompt_vis) {
+                        try stdout.print("{s}{s}", .{ line_clear, prompt });
+                    }
+                } else try printMsg(p, stdout);
+            },
+            .init => |i| {
+                state.rid = parsed_value.rid;
+                state.name = try aa.dupe(u8, i);
+            },
+            .name => |n| {
+                aa.free(state.name);
+                state.name = try aa.dupe(u8, n);
+            },
+            .msg => |m| {
+                var pitr = std.mem.splitScalar(u8, m.peer.?, ' ');
+                const name = pitr.next().?;
+                const rid = pitr.next().?;
+                const msg = try std.fmt.allocPrint(aa, "({s}, {s}): {s}", .{ name, rid, m.buf });
+                defer aa.free(msg);
+                try printMsg(msg, stdout);
+            },
+            .users => |u| {
+                defer {
+                    for (u) |*i| {
+                        aa.free(i.links);
+                        aa.free(i.name);
+                    }
+                }
+
+                const msg = try client_mod.formatUsers(state, u);
+                defer state.aa.free(msg);
+                try printMsg(msg, stdout);
+            },
+            .err => |e| {
+                try printMsg(e, stdout);
+            },
+            .new_user => {},
+            else => unreachable,
+        }
     }
+}
+
+inline fn printMsg(msg: []const u8, stdout: *Io.Writer) !void {
+    if (ui.prompt_vis) {
+        try stdout.print("{s}{s}\n{s}", .{ line_clear, msg, prompt });
+    } else {
+        try stdout.print("{s}\n", .{msg});
+    }
+    try stdout.flush();
 }
 
 const std = @import("std");
@@ -261,11 +357,13 @@ const Io = std.Io;
 const net = Io.net;
 const File = Io.File;
 const posix = std.posix;
-const server_mod = @import("server");
+const client_mod = @import("client");
 const utils = @import("utils");
 const types = @import("types");
+const State = types.CClient;
 const Packet = types.Packet;
 const PacketType = types.PacketType;
+const Stringify = std.json.Stringify;
 
 pub const UiState = struct {
     mutex: Io.Mutex = .init,

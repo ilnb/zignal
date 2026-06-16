@@ -19,7 +19,7 @@ pub fn handleClient(client: *Client, state: *State) !void {
         };
         const len = try std.fmt.parseInt(usize, slen, 10);
 
-        const line = r.readAlloc(state.aa, len) catch |err| {
+        const msg = r.readAlloc(state.aa, len) catch |err| {
             switch (err) {
                 error.OutOfMemory => {
                     info("OOM while reading message from {d}", .{client.rid});
@@ -30,270 +30,195 @@ pub fn handleClient(client: *Client, state: *State) !void {
             }
             break;
         };
-        defer state.aa.free(line);
+        defer state.aa.free(msg);
 
-        const trimmed = std.mem.trim(u8, line, " ");
-        if (trimmed.len == 0) continue;
-        info("{d} says {s}", .{ client.rid, trimmed });
-        try parseHeaderAndAct(client, trimmed, state);
+        info("{d} says {s}", .{ client.rid, msg });
+        parseHeaderAndAct(client, msg, state) catch |err| {
+            info("Closing client {d} due to error: {any}", .{ client.rid, err });
+            return;
+        };
     }
 }
 
 fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
     const io = state.io;
-    var pkt = try parsePacket(client, msg, state);
+    const aa = state.aa;
+    const parsed_pkt = try std.json.parseFromSlice(Packet, aa, msg, .{});
+    const parsed_value = parsed_pkt.value;
+    defer parsed_pkt.deinit();
+
     var buf: [1024]u8 = undefined;
     var writer = client.conn.writer(io, &buf);
     const w = &writer.interface;
 
-    switch (pkt.data) {
-        .echo,
-        .init,
-        => {
-            const res = try valueAlloc(state.aa, pkt, .{ .whitespace = .indent_2 });
-            defer state.aa.free(res);
-            client.errWriteAll(w, res) orelse return;
+    switch (parsed_value.data) {
+        .echo => {
+            try client.writer_mutex.lock(io);
+            defer client.writer_mutex.unlock(io);
+            client.errWriteAll(w, msg) orelse return;
             client.errFlush(w) orelse return;
+        },
+        .name => |name| {
+            try state.mutex.lock(io);
+            defer state.mutex.unlock(io);
+            const token: *Token = for (state.tokens.items) |*t| {
+                if (t.rid) |rid| if (rid == client.rid) break t;
+            } else {
+                info("Corrupted tokens list. Client with {d} not found.", .{client.rid});
+                try client.sendData(w, Data{
+                    .err = "ERR: Corrupted tokens list on server. Client not found.",
+                }) orelse return;
+                return;
+            };
+            state.ga.free(token.name);
+            token.name = state.ga.dupe(u8, name) catch |err| {
+                info("Failed to set name for {d}: {any}", .{ client.rid, err });
+                const e = try allocPrint(aa, "ERR: Failed to set name: {any}", .{err});
+                defer aa.free(e);
+                try client.writer_mutex.lock(io);
+                defer client.writer_mutex.unlock(io);
+                try client.sendData(w, Data{ .err = e }) orelse return;
+                return;
+            };
+            client.name = token.name;
+            info("Named {d} -> {s}", .{ client.rid, name });
+            try client.writer_mutex.lock(io);
+            defer client.writer_mutex.unlock(io);
+            try client.sendData(w, parsed_value.data) orelse return;
         },
         .link => |p| {
             try state.mutex.lock(io);
             defer state.mutex.unlock(io);
-            const c2 = state.clients.items[p.with];
+            const i = getClientById(state, p.with) orelse getClientByName(state, p.with) orelse {
+                const e = try allocPrint(aa, "ERR: Failed to link to {s}. Invalid id or name.", .{p.with});
+                defer aa.free(e);
+                try client.writer_mutex.lock(io);
+                defer client.writer_mutex.unlock(io);
+                try client.sendData(w, Data{ .err = e }) orelse return;
+                return;
+            };
+            const c2 = state.clients.items[i];
             if (!p.invert) {
                 try linkClients(client, c2, state);
             } else {
                 try unlinkClients(client, c2, state);
             }
+            try client.writer_mutex.lock(io);
+            defer client.writer_mutex.unlock(io);
             client.errWriteAll(w, "") orelse return;
             client.errFlush(w) orelse return;
         },
         .msg => |p| {
-            try state.mutex.lock(io);
-            defer state.mutex.unlock(io);
-            defer state.aa.free(p.buf);
-            if (p.to) |i| {
-                const c2 = state.clients.items[i];
-                try sendMsg(state.io, client, c2, p.buf);
+            if (p.peer) |ibuf| {
+                try state.mutex.lock(io);
+                defer state.mutex.unlock(io);
+                const i = getClientById(state, ibuf) orelse getClientByName(state, ibuf) orelse {
+                    const e = try allocPrint(aa, "ERR: Failed to send message to {s}. Invalid id or name.", .{p.buf});
+                    defer aa.free(e);
+                    try client.writer_mutex.lock(io);
+                    defer client.writer_mutex.unlock(io);
+                    try client.sendData(w, Data{ .err = e }) orelse return;
+                    return;
+                };
+                const c = state.clients.items[i];
+                if (state.links.getPtr(client.rid).?.contains(c.rid) == null) {
+                    const e = try allocPrint(aa, "ERR: Not connected to {d}.", .{c.rid});
+                    defer aa.free(e);
+                    try client.writer_mutex.lock(io);
+                    defer client.writer_mutex.unlock(io);
+                    try client.sendData(w, Data{ .err = e }) orelse return;
+                    return;
+                }
+                var cw_file = c.conn.writer(io, &buf);
+                const cw = &cw_file.interface;
+                const peer = try allocPrint(aa, "{s} {d}", .{ client.name, client.rid });
+                defer aa.free(peer);
+                try c.writer_mutex.lock(io);
+                defer c.writer_mutex.unlock(io);
+                try c.sendData(cw, Data{
+                    .msg = .{
+                        .peer = peer,
+                        .buf = p.buf,
+                    },
+                }) orelse return;
             } else {
-                try sendAll(state.io, client, p.buf);
+                try client.active_mutex.lock(io);
+                defer client.active_mutex.unlock(io);
+                for (client.active.items) |c| {
+                    if (client.rid != c.rid) {
+                        @branchHint(.likely);
+                        var cw_file = c.conn.writer(io, &buf);
+                        const cw = &cw_file.interface;
+                        const peer = try allocPrint(aa, "{s} {d}", .{ client.name, client.rid });
+                        defer aa.free(peer);
+                        try c.writer_mutex.lock(io);
+                        defer c.writer_mutex.unlock(io);
+                        try c.sendData(cw, Data{
+                            .msg = .{
+                                .peer = peer,
+                                .buf = p.buf,
+                            },
+                        }) orelse continue;
+                    }
+                }
             }
+            try client.writer_mutex.lock(io);
+            defer client.writer_mutex.unlock(io);
             client.errWriteAll(w, "") orelse return;
             client.errFlush(w) orelse return;
         },
-        .to_get => |*p| {
+        .to_get => |p| {
             try state.mutex.lock(io);
-            defer state.mutex.unlock(io);
-            if (p.items.len != 0) {
-                defer p.deinit(state.aa);
-                for (p.items) |c2| {
-                    try displayClient(client, state.clients.items[c2], state);
+            var arr: std.ArrayList(Packet.Infos) = try .initCapacity(aa, p.len);
+            errdefer arr.deinit(aa);
+            if (p.len != 0) {
+                for (p) |c2| {
+                    const i = getClientById(state, c2) orelse getClientByName(state, c2) orelse {
+                        const e = try allocPrint(aa, "ERR: Failed to getinfo of {s}. Invalid id or name.", .{c2});
+                        defer aa.free(e);
+                        try client.writer_mutex.lock(io);
+                        defer client.writer_mutex.unlock(io);
+                        try client.sendData(w, Data{ .err = e }) orelse continue;
+                        continue;
+                    };
+                    try arr.append(aa, try getInfo(state.clients.items[i], state));
                 }
             } else {
-                try displayAll(client, state);
+                for (state.clients.items) |c| {
+                    try arr.append(aa, try getInfo(c, state));
+                }
             }
+            state.mutex.unlock(io);
+            const users = try arr.toOwnedSlice(aa);
+            defer {
+                for (users) |*u| aa.free(u.links);
+                aa.free(users);
+            }
+            try client.writer_mutex.lock(io);
+            defer client.writer_mutex.unlock(io);
+            try client.sendData(w, Data{
+                .users = users,
+            }) orelse return;
         },
         .err => |p| {
-            try state.mutex.lock(io);
-            defer state.mutex.unlock(io);
-            defer state.aa.free(p);
-            const res = try valueAlloc(state.aa, pkt, .{ .whitespace = .indent_2 });
-            defer state.aa.free(res);
-            client.errWriteAll(w, res) orelse return;
-            client.errFlush(w) orelse return;
+            try client.writer_mutex.lock(io);
+            defer client.writer_mutex.unlock(io);
+            try client.sendData(w, Data{ .err = p }) orelse return;
         },
-        .name, .new_user, .users => {},
+        .init, .new_user, .users => {},
     }
 }
 
-fn parsePacket(client: *Client, msg: []const u8, state: *State) !Packet {
-    const io = state.io;
-    var itr = std.mem.tokenizeScalar(u8, msg, ' ');
+inline fn getInfo(c: *Client, state: *State) !Packet.Infos {
+    const links = state.links.getPtr(c.rid).?;
+    var itr = links.iterator();
+    var links_arr: std.ArrayList(usize) = try .initCapacity(state.aa, links.count);
+    while (itr.next()) |n| try links_arr.append(state.aa, n.key);
 
-    const header = itr.next() orelse return Packet{
-        .rid = client.rid,
-        .data = .{ .echo = "" },
-    };
-    if (eql(u8, header, "ECHO")) {
-        const to_echo = itr.rest();
-        return Packet{
-            .rid = client.rid,
-            .data = .{
-                .echo = to_echo,
-            },
-        };
-    } else if (eql(u8, header, "WHOAMI")) {
-        return Packet{
-            .rid = client.rid,
-            .data = .{
-                .name = client.name,
-            },
-        };
-    } else if (eql(u8, header, "NAME")) {
-        const name = itr.next() orelse return Packet{
-            .rid = client.rid,
-            .data = .{
-                .err = try state.aa.dupe(u8, "No id or name specified."),
-            },
-        };
-        var num_count: usize = 0;
-        for (name) |c| {
-            if (c >= '0' and c <= '9') num_count += 1;
-        }
-        if (num_count == name.len) return Packet{
-            .rid = client.rid,
-            .data = .{
-                .err = try state.aa.dupe(u8, "All numeric name is not allowed."),
-            },
-        };
-        try state.mutex.lock(io);
-        const token: *Token = for (state.tokens.items) |*t| {
-            if (t.rid) |rid| if (rid == client.rid) break t;
-        } else {
-            info("Corrupted tokens list. Client with {d} not found.", .{client.rid});
-            return Packet{
-                .rid = client.rid,
-                .data = .{ .echo = "" },
-            };
-        };
-        state.mutex.unlock(io);
-        state.ga.free(token.name);
-        token.name = state.ga.dupe(u8, name) catch |err| {
-            info("Failed to set name for {d}: {any}", .{ client.rid, err });
-            return Packet{
-                .rid = client.rid,
-                .data = .{
-                    .err = try allocPrint(state.aa, "Failed to set name: {any}", .{err}),
-                },
-            };
-        };
-        client.name = token.name;
-        info("Named {d} -> {s}", .{ client.rid, name });
-        return Packet{
-            .rid = client.rid,
-            .data = .{ .echo = "" },
-        };
-    } else if (eql(u8, header, "LINK")) {
-        const buf = itr.next() orelse return Packet{
-            .rid = client.rid,
-            .data = .{
-                .err = try state.aa.dupe(u8, "No id or name specified."),
-            },
-        };
-        try state.mutex.lock(io);
-        const c2 = getClientById(state, buf) orelse getClientByName(state, buf) orelse return Packet{
-            .rid = client.rid,
-            .data = .{
-                .err = try allocPrint(state.ga, "Failed to connect to {s}. Invalid id or name.", .{buf}),
-            },
-        };
-        state.mutex.unlock(io);
-        if (client.rid == c2) return Packet{
-            .rid = client.rid,
-            .data = .{
-                .err = try state.aa.dupe(u8, "Self link."),
-            },
-        };
-        return Packet{
-            .rid = client.rid,
-            .data = .{
-                .link = .{
-                    .with = c2,
-                },
-            },
-        };
-    } else if (eql(u8, header, "UNLINK")) {
-        const buf = itr.next() orelse return Packet{
-            .rid = client.rid,
-            .data = .{
-                .err = try state.aa.dupe(u8, "No id or name specified."),
-            },
-        };
-        try state.mutex.lock(io);
-        const c2 = getClientById(state, buf) orelse getClientByName(state, buf) orelse return Packet{
-            .rid = client.rid,
-            .data = .{
-                .err = try allocPrint(state.aa, "Failed to unlink from {s}. Invalid id or name.", .{buf}),
-            },
-        };
-        state.mutex.unlock(io);
-        if (client.rid == c2) return Packet{
-            .rid = client.rid,
-            .data = .{
-                .err = try state.aa.dupe(u8, "Self unlink."),
-            },
-        };
-        return Packet{
-            .rid = client.rid,
-            .data = .{
-                .link = .{
-                    .with = c2,
-                    .invert = true,
-                },
-            },
-        };
-    } else if (eql(u8, header, "SENDTO")) {
-        const buf = itr.next() orelse return Packet{
-            .rid = client.rid,
-            .data = .{
-                .err = try state.aa.dupe(u8, "No id or name specified."),
-            },
-        };
-        const to_send = std.mem.trim(u8, itr.rest(), " \n");
-        try state.mutex.lock(io);
-        const c2 = getClientById(state, buf) orelse getClientByName(state, buf) orelse return Packet{
-            .rid = client.rid,
-            .data = .{
-                .err = try allocPrint(state.aa, "Failed to send message to {s}. Invalid id or name.", .{buf}),
-            },
-        };
-        state.mutex.unlock(io);
-        return Packet{
-            .rid = client.rid,
-            .data = .{
-                .msg = .{
-                    .to = c2,
-                    .buf = try state.aa.dupe(u8, to_send),
-                },
-            },
-        };
-    } else if (eql(u8, header, "ALL")) {
-        const to_send = std.mem.trim(u8, itr.rest(), " \n");
-        return Packet{
-            .rid = client.rid,
-            .data = .{
-                .msg = .{
-                    .buf = try state.aa.dupe(u8, to_send),
-                },
-            },
-        };
-    } else if (eql(u8, header, "GETINFO")) {
-        const buf = itr.next() orelse return Packet{
-            .rid = client.rid,
-            .data = .{
-                .to_get = .empty,
-            },
-        };
-        try state.mutex.lock(io);
-        const to_fetch = getClientById(state, buf) orelse getClientByName(state, buf) orelse return Packet{
-            .rid = client.rid,
-            .data = .{
-                .err = try allocPrint(state.aa, "Failed to getinfo of {s}. Invalid id or name.", .{buf}),
-            },
-        };
-        state.mutex.unlock(io);
-        var arr: std.ArrayList(usize) = .empty;
-        try arr.append(state.aa, to_fetch);
-        return Packet{
-            .rid = client.rid,
-            .data = .{
-                .to_get = arr,
-            },
-        };
-    } else return Packet{
-        .rid = client.rid,
-        .data = .{
-            .err = try allocPrint(state.aa, "Invalid cmd {s}.", .{header}),
-        },
+    return .{
+        .rid = c.rid,
+        .name = c.name,
+        .links = try links_arr.toOwnedSlice(state.aa),
     };
 }
 
@@ -380,180 +305,6 @@ fn unlinkClients(client1: *Client, client2: *Client, state: *State) !void {
     info("Disconnected {d} and {d}", .{ id1, id2 });
 }
 
-fn sendMsg(io: std.Io, from: *Client, to: *Client, to_send: []const u8) !void {
-    var buf: [1024]u8 = undefined;
-
-    const err_msg: ?[]const u8 = if (!to.online)
-        bufPrint(&buf, "Client {d} is offline.", .{to.rid}) catch "Specified client is offline."
-    else if (from == to)
-        "Self message."
-    else if (to_send.len == 0)
-        "Empty message."
-    else
-        null;
-
-    if (err_msg != null) {
-        try from.writer_mutex.lock(io);
-        defer from.writer_mutex.unlock(io);
-        var writer = from.conn.writer(io, &buf);
-        const w = &writer.interface;
-        from.errWrite(w, "ERR: {s}", .{err_msg.?}) orelse return;
-        from.errFlush(w) orelse return;
-        return;
-    }
-
-    try from.active_mutex.lock(io);
-    defer from.active_mutex.unlock(io);
-    _ = for (from.active.items) |c| {
-        if (c == to) break c;
-    } else {
-        try from.writer_mutex.lock(io);
-        defer from.writer_mutex.unlock(io);
-        var writer = from.conn.writer(io, &buf);
-        const w = &writer.interface;
-        from.errWrite(w, "ERR: Not connected to {s}.", .{to.name}) orelse return;
-        from.errFlush(w) orelse return;
-        return;
-    };
-
-    try to.active_mutex.lock(io);
-    defer to.active_mutex.unlock(io);
-    _ = for (to.active.items) |c| {
-        if (c == from) break c;
-    } else {
-        try to.writer_mutex.lock(io);
-        defer to.writer_mutex.unlock(io);
-        var writer = to.conn.writer(io, &buf);
-        const w = &writer.interface;
-        to.errWrite(w, "ERR: Not connected to {s}.", .{from.name}) orelse return;
-        to.errFlush(w) orelse return;
-        return;
-    };
-
-    try to.writer_mutex.lock(io);
-    defer to.writer_mutex.unlock(io);
-    var writer = to.conn.writer(io, &buf);
-    const w = &writer.interface;
-    to.errWrite(w, "({s}, {d}): {s}", .{ from.name, from.rid, to_send }) orelse return;
-    to.errFlush(w) orelse return;
-}
-
-fn sendAll(io: std.Io, from: *Client, to_send: []const u8) !void {
-    if (to_send.len == 0) return;
-    var buf: [1024]u8 = undefined;
-    try from.active_mutex.lock(io);
-    defer from.active_mutex.unlock(io);
-    for (from.active.items) |c| {
-        if (!c.online) continue;
-        try c.writer_mutex.lock(io);
-        defer c.writer_mutex.unlock(io);
-        var writer = c.conn.writer(io, &buf);
-        const w = &writer.interface;
-        c.errWrite(w, "({s}, {d}): {s}", .{ from.name, from.rid, to_send }) orelse return;
-        c.errFlush(w) orelse return;
-    }
-}
-
-fn displayClient(client: *Client, to_fetch: *Client, state: *State) !void {
-    const io = state.io;
-    var id_w: usize, var name_w: usize = .{ 0, "NAME".len };
-    for (state.clients.items) |c| {
-        if (!c.online) continue;
-        id_w = @max(id_w, std.fmt.count("{d}", .{c.rid}));
-        name_w = @max(name_w, c.name.len);
-    }
-    id_w += 2;
-    if (name_w == "NAME".len) name_w += 1;
-    name_w += 2;
-
-    const ga = client.ga;
-    var msg: std.ArrayList(u8) = .empty;
-    defer msg.deinit(ga);
-
-    var res = try allocPrint(ga, "{s: <[2]}{s: <[3]}LINK\n", .{ "ID", "NAME", id_w, name_w });
-    try msg.appendSlice(ga, res);
-    ga.free(res);
-
-    var name_buf: [256]u8 = undefined;
-    const name = if (to_fetch.rid == client.rid)
-        std.fmt.bufPrint(&name_buf, "{s}*", .{to_fetch.name}) catch to_fetch.name
-    else
-        to_fetch.name;
-    res = try allocPrint(ga, "{d: <[2]}{s: <[3]}", .{ to_fetch.rid, name, id_w, name_w });
-    try msg.appendSlice(ga, res);
-    ga.free(res);
-
-    const conns = state.links.getPtr(to_fetch.rid).?;
-    var itr = conns.iterator();
-    var i: usize = 1;
-    while (itr.next()) |node| {
-        res = try allocPrint(ga, "{d}{s}", .{ node.key, if (i != conns.count) ", " else "" });
-        try msg.appendSlice(ga, res);
-        ga.free(res);
-        i += 1;
-    }
-
-    var write_buf: [1024]u8 = undefined;
-    try client.writer_mutex.lock(io);
-    defer client.writer_mutex.unlock(io);
-    var writer = client.conn.writer(io, &write_buf);
-    const w = &writer.interface;
-    client.errWriteAll(w, msg.items) orelse return;
-    client.errFlush(w) orelse return;
-}
-
-fn displayAll(client: *Client, state: *State) !void {
-    const io = state.io;
-    var id_w: usize, var name_w: usize = .{ 0, "NAME".len };
-    for (state.clients.items) |c| {
-        if (!c.online) continue;
-        id_w = @max(id_w, std.fmt.count("{d}", .{c.rid}));
-        name_w = @max(name_w, c.name.len);
-    }
-    id_w += 2;
-    if (name_w == "NAME".len) name_w += 1;
-    name_w += 2;
-
-    const ga = client.ga;
-    var msg: std.ArrayList(u8) = .empty;
-    defer msg.deinit(ga);
-
-    var res = try allocPrint(ga, "{s: <[2]}{s: <[3]}LINK\n", .{ "ID", "NAME", id_w, name_w });
-    try msg.appendSlice(ga, res);
-    ga.free(res);
-
-    for (state.clients.items) |c| {
-        var name_buf: [256]u8 = undefined;
-        const name = if (c.rid == client.rid)
-            std.fmt.bufPrint(&name_buf, "{s}*", .{c.name}) catch c.name
-        else
-            c.name;
-        res = try allocPrint(ga, "{d: <[2]}{s: <[3]}", .{ c.rid, name, id_w, name_w });
-        try msg.appendSlice(ga, res);
-        ga.free(res);
-
-        const conns = state.links.getPtr(c.rid).?;
-        var itr = conns.iterator();
-        var i: usize = 1;
-        while (itr.next()) |node| {
-            res = try allocPrint(ga, "{d}{s}", .{ node.key, if (i != conns.count) ", " else "" });
-            try msg.appendSlice(ga, res);
-            ga.free(res);
-            i += 1;
-        }
-        try msg.append(ga, '\n');
-    }
-    _ = msg.pop();
-
-    var write_buf: [1024]u8 = undefined;
-    try client.writer_mutex.lock(io);
-    defer client.writer_mutex.unlock(io);
-    var writer = client.conn.writer(io, &write_buf);
-    const w = &writer.interface;
-    client.errWriteAll(w, msg.items) orelse return;
-    client.errFlush(w) orelse return;
-}
-
 fn cleanupClient(client: *Client, state: *State) !void {
     const io = state.io;
     const id = client.rid;
@@ -628,11 +379,12 @@ const eql = std.mem.eql;
 const info = std.log.info;
 const net = std.Io.net;
 const types = @import("types");
-const State = types.ServState;
-const Client = State.Client;
+const State = types.Server;
+const Client = State.SClient;
 const Token = types.Token;
 const Packet = types.Packet;
 const PacketType = types.PacketType;
+const Data = Packet.Data;
 const utils = @import("utils");
 const bufPrint = std.fmt.bufPrint;
 const allocPrint = std.fmt.allocPrint;

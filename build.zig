@@ -47,7 +47,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .imports = &.{
-                .{ .name = "client", .module = server_mod },
+                .{ .name = "server", .module = server_mod },
                 .{ .name = "avl", .module = avl },
                 .{ .name = "utils", .module = utils },
                 .{ .name = "types", .module = types },
@@ -80,7 +80,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .imports = &.{
-                .{ .name = "server", .module = client_mod },
+                .{ .name = "client", .module = client_mod },
                 .{ .name = "avl", .module = avl },
                 .{ .name = "utils", .module = utils },
                 .{ .name = "types", .module = types },

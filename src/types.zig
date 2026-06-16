@@ -19,11 +19,11 @@ pub const PacketType = enum {
 };
 
 pub const Packet = struct {
-    const Info = ClientState.Info;
+    const Info = GClient.Info;
     pub const Infos = struct {
         rid: usize,
         name: []u8,
-        links: AL(usize),
+        links: []usize,
     };
     pub const Data = union(PacketType) {
         echo: []const u8,
@@ -31,56 +31,44 @@ pub const Packet = struct {
         name: []u8,
         new_user: Info,
         link: struct {
-            with: usize,
+            with: []u8,
             invert: bool = false,
         },
         msg: struct {
-            to: ?usize = null,
+            peer: ?[]u8 = null,
             buf: []u8,
         },
-        users: AL(Infos),
-        to_get: AL(usize),
-        err: []u8,
+        users: []Infos,
+        to_get: [][]u8,
+        err: []const u8,
     };
 
     rid: usize,
     data: Data,
 };
 
-pub const ServState = struct {
+pub const Server = struct {
     const Self = @This();
-    pub const Client = struct {
+    pub const SClient = struct {
         rid: usize,
         conn: net.Stream,
         name: []u8, // non owning ref
         online: bool = true,
         writer_mutex: Mutex = .init,
-        active: AL(*Client) = .empty,
+        active: AL(*SClient) = .empty,
         active_mutex: Mutex = .init,
         ga: Allocator,
 
-        pub fn init(self: *Client, conn: *const net.Stream, token: *Token, aa: Allocator) void {
+        pub fn init(self: *SClient, conn: *const net.Stream, token: *Token, aa: Allocator) void {
             self.* = .{
                 .rid = token.rid.?,
                 .conn = conn.*,
                 .name = token.name,
-                .online = true,
-                .writer_mutex = .init,
-                .active = .empty,
-                .active_mutex = .init,
                 .ga = aa,
             };
         }
 
-        pub fn makeInitInfo(self: *Client, aa: Allocator) ![]u8 {
-            const tmp = try aa.create(ClientState.Info);
-            defer aa.destroy(tmp);
-            tmp.* = .{ .rid = self.rid, .name = self.name };
-            const msg = try std.json.Stringify.valueAlloc(aa, tmp, .{ .whitespace = .indent_2 });
-            return msg;
-        }
-
-        pub inline fn errWrite(self: *Client, w: *Writer, comptime fmt: []const u8, args: anytype) ?void {
+        pub inline fn errWrite(self: *const SClient, w: *Writer, comptime fmt: []const u8, args: anytype) ?void {
             const res = std.fmt.allocPrint(self.ga, fmt, args) catch |err| {
                 info("Write failed to {d}: {any}", .{ self.rid, err });
                 return null;
@@ -89,22 +77,49 @@ pub const ServState = struct {
             self.errWriteAll(w, res) orelse return;
         }
 
-        pub inline fn errWriteAll(self: *Client, w: *Writer, msg: []const u8) ?void {
+        pub inline fn errWriteAll(self: *const SClient, w: *Writer, msg: []const u8) ?void {
             w.print("{d} {s}", .{ msg.len, msg }) catch |err| {
                 info("Write failed to {d}: {any}", .{ self.rid, err });
                 return null;
             };
         }
 
-        pub inline fn errFlush(self: *Client, w: *Writer) ?void {
+        pub inline fn errFlush(self: *const SClient, w: *Writer) ?void {
             w.flush() catch |err| {
                 info("Flush failed to {d}: {any}", .{ self.rid, err });
                 return null;
             };
         }
+
+        pub fn sendData(self: *const SClient, w: *Writer, data: Packet.Data) !?void {
+            const msg = try std.json.Stringify.valueAlloc(self.ga, Packet{
+                .rid = self.rid,
+                .data = data,
+            }, .{ .whitespace = .indent_2 });
+            defer self.ga.free(msg);
+            self.errWriteAll(w, msg) orelse return null;
+            self.errFlush(w) orelse return null;
+        }
+
+        pub fn wSendData(ga: Allocator, w: *Writer, data: Packet.Data) !?void {
+            const rid = std.math.maxInt(usize);
+            const msg = try std.json.Stringify.valueAlloc(ga, Packet{
+                .rid = rid,
+                .data = data,
+            }, .{ .whitespace = .indent_2 });
+            defer ga.free(msg);
+            w.print("{d} {s}", .{ msg.len, msg }) catch |err| {
+                info("Write failed to {d}: {any}", .{ rid, err });
+                return null;
+            };
+            w.flush() catch |err| {
+                info("Flush failed to {d}: {any}", .{ rid, err });
+                return null;
+            };
+        }
     };
 
-    clients: AL(*Client) = .empty,
+    clients: AL(*SClient) = .empty,
     links: HM(usize, Set(usize)),
     mutex: Mutex = .init,
     profile_dir: Io.Dir,
@@ -134,7 +149,14 @@ pub const ServState = struct {
     }
 };
 
-pub const ClientState = struct {
+pub const CClient = struct {
+    rid: usize = undefined,
+    name: []u8 = undefined,
+    aa: Allocator,
+    io: Io,
+};
+
+pub const GClient = struct {
     const Self = @This();
     pub const Client = struct {
         connected: bool,
@@ -147,7 +169,7 @@ pub const ClientState = struct {
     pub const Msg = struct { rid: usize, buf: []u8 };
 
     name: ?[]u8 = null,
-    clients: AL(Self.Client) = .empty,
+    clients: AL(Client) = .empty,
     clients_mutex: Mutex = .init,
     ga: Allocator,
     io: Io,

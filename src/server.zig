@@ -117,15 +117,16 @@ pub fn main(init: std.process.Init) !void {
         const no_timeout = posix.timeval{ .sec = 0, .usec = 0 };
         try posix.setsockopt(conn.socket.handle, posix.SOL.SOCKET, posix.SO.RCVTIMEO, &std.mem.toBytes(no_timeout));
 
-        var result = client_mod.handshakeWithClient(conn, &state) catch |err| {
+        var result = server_mod.handshakeWithClient(conn, &state) catch |err| {
+            defer conn.close(io);
             info("Handshake failed with client {f} with error {any}. Terminating connection", .{ conn.socket.address, err });
             const res = try std.fmt.allocPrint(ga, "ERR: {any}", .{err});
             defer ga.free(res);
             var c_writer = conn.writer(io, &buf);
             const w = &c_writer.interface;
-            try w.print("{d} {s}", .{ res.len, res });
-            try w.flush();
-            conn.close(io);
+            try Client.wSendData(state.aa, w, Packet.Data{
+                .err = res,
+            }) orelse continue;
             continue;
         };
 
@@ -200,7 +201,7 @@ pub fn main(init: std.process.Init) !void {
             c.errFlush(cw) orelse continue;
         }
 
-        _ = try std.Thread.spawn(.{}, client_mod.handleClient, .{ client, &state });
+        _ = try std.Thread.spawn(.{}, server_mod.handleClient, .{ client, &state });
     }
     try updateTokensFile(&state);
     info("Closing the server", .{});
@@ -263,12 +264,12 @@ const linux = std.os.linux;
 const bufPrint = std.fmt.bufPrint;
 const info = std.log.info;
 const types = @import("types");
-const State = types.ServState;
-const Client = State.Client;
+const State = types.Server;
+const Client = State.SClient;
 const Token = types.Token;
 const Set = types.Set;
 const Packet = types.Packet;
 const PacketType = types.PacketType;
-const client_mod = @import("client");
+const server_mod = @import("server");
 const utils = @import("utils");
 const checkLock = utils.checkLock;
