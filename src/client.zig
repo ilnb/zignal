@@ -328,15 +328,8 @@ fn recvFn(r: *Io.Reader, stdout: *Io.Writer, state: *State) !void {
                 try printMsg(msg, stdout);
             },
             .users => |u| {
-                defer {
-                    for (u) |*i| {
-                        aa.free(i.links);
-                        aa.free(i.name);
-                    }
-                }
-
                 const msg = try client_mod.formatUsers(state, u);
-                defer state.aa.free(msg);
+                defer aa.free(msg);
                 try printMsg(msg, stdout);
             },
             .err => |e| {

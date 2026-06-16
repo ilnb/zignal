@@ -59,7 +59,7 @@ pub const Server = struct {
         active_mutex: Mutex = .init,
         ga: Allocator,
 
-        pub fn init(self: *SClient, conn: *const net.Stream, token: *Token, aa: Allocator) void {
+        pub inline fn init(self: *SClient, conn: *const net.Stream, token: *Token, aa: Allocator) void {
             self.* = .{
                 .rid = token.rid.?,
                 .conn = conn.*,
@@ -91,7 +91,7 @@ pub const Server = struct {
             };
         }
 
-        pub fn sendData(self: *const SClient, w: *Writer, data: Packet.Data) !?void {
+        pub inline fn sendData(self: *const SClient, w: *Writer, data: Packet.Data) !?void {
             const msg = try std.json.Stringify.valueAlloc(self.ga, Packet{
                 .rid = self.rid,
                 .data = data,
@@ -101,7 +101,7 @@ pub const Server = struct {
             self.errFlush(w) orelse return null;
         }
 
-        pub fn wSendData(ga: Allocator, w: *Writer, data: Packet.Data) !?void {
+        pub inline fn wSendData(ga: Allocator, w: *Writer, data: Packet.Data) !?void {
             const rid = std.math.maxInt(usize);
             const msg = try std.json.Stringify.valueAlloc(ga, Packet{
                 .rid = rid,
@@ -128,7 +128,7 @@ pub const Server = struct {
     aa: Allocator,
     io: Io,
 
-    pub fn deinit(self: *Self) void {
+    pub inline fn deinit(self: *Self) void {
         const ga = self.ga;
         const tokens = &self.tokens;
         const clients = &self.clients;
@@ -174,7 +174,7 @@ pub const GClient = struct {
     ga: Allocator,
     io: Io,
 
-    pub fn deinit(self: *Self) void {
+    pub inline fn deinit(self: *Self) void {
         const aa = self.ga;
         if (self.name) |name| aa.free(name);
         for (self.clients.items) |*c| {
