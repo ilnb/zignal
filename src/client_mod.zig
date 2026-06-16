@@ -61,7 +61,7 @@ pub fn parsePacket(state: *State, msg: []const u8) !?Packet {
         const name = itr.next() orelse return Packet{
             .rid = state.rid,
             .data = .{
-                .err = try state.aa.dupe(u8, "Local error: No id or name specified."),
+                .err = try state.aa.dupe(u8, "No id or name specified."),
             },
         };
         var num_count: usize = 0;
@@ -71,7 +71,7 @@ pub fn parsePacket(state: *State, msg: []const u8) !?Packet {
         if (num_count == name.len) return Packet{
             .rid = state.rid,
             .data = .{
-                .err = try state.aa.dupe(u8, "Local error: All numeric name is not allowed."),
+                .err = try state.aa.dupe(u8, "All numeric name is not allowed."),
             },
         };
         if (eql(u8, name, state.name)) return null;
@@ -85,13 +85,13 @@ pub fn parsePacket(state: *State, msg: []const u8) !?Packet {
         const buf = itr.next() orelse return Packet{
             .rid = state.rid,
             .data = .{
-                .err = try state.aa.dupe(u8, "Local error: No id or name specified."),
+                .err = try state.aa.dupe(u8, "No id or name specified."),
             },
         };
         if (eql(u8, buf, state.name) or std.fmt.parseInt(usize, buf, 10) catch std.math.maxInt(usize) == state.rid) return Packet{
             .rid = state.rid,
             .data = .{
-                .err = try state.aa.dupe(u8, "Local error: Self link."),
+                .err = try state.aa.dupe(u8, "Self link."),
             },
         };
         return Packet{
@@ -106,13 +106,13 @@ pub fn parsePacket(state: *State, msg: []const u8) !?Packet {
         const buf = itr.next() orelse return Packet{
             .rid = state.rid,
             .data = .{
-                .err = try state.aa.dupe(u8, "Local error: No id or name specified."),
+                .err = try state.aa.dupe(u8, "No id or name specified."),
             },
         };
         if (eql(u8, buf, state.name) or std.fmt.parseInt(usize, buf, 10) catch std.math.maxInt(usize) == state.rid) return Packet{
             .rid = state.rid,
             .data = .{
-                .err = try state.aa.dupe(u8, "Local error: Self unlink."),
+                .err = try state.aa.dupe(u8, "Self unlink."),
             },
         };
         return Packet{
@@ -128,20 +128,20 @@ pub fn parsePacket(state: *State, msg: []const u8) !?Packet {
         const buf = itr.next() orelse return Packet{
             .rid = state.rid,
             .data = .{
-                .err = try state.aa.dupe(u8, "Local error: No id or name specified."),
+                .err = try state.aa.dupe(u8, "No id or name specified."),
             },
         };
         const to_send = std.mem.trim(u8, itr.rest(), " \n");
         if (to_send.len == 0) return Packet{
             .rid = state.rid,
             .data = .{
-                .err = "Local error: Nothing to send.",
+                .err = "Nothing to send.",
             },
         };
         if (eql(u8, buf, state.name) or std.fmt.parseInt(usize, buf, 10) catch std.math.maxInt(usize) == state.rid) return Packet{
             .rid = state.rid,
             .data = .{
-                .err = try state.aa.dupe(u8, "Local error: Self message."),
+                .err = try state.aa.dupe(u8, "Self message."),
             },
         };
         return Packet{
@@ -176,7 +176,7 @@ pub fn parsePacket(state: *State, msg: []const u8) !?Packet {
     } else return Packet{
         .rid = state.rid,
         .data = .{
-            .err = try allocPrint(state.aa, "Local error: Invalid cmd {s}.", .{header}),
+            .err = try allocPrint(state.aa, "Invalid cmd {s}.", .{header}),
         },
     };
 }
