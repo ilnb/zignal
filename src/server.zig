@@ -156,8 +156,7 @@ pub fn main(init: std.process.Init) !void {
                 } else null;
                 if (client_idx) |cidx| {
                     client = state.clients.items[cidx];
-                    client.conn = conn;
-                    client.online = true;
+                    client.init(&conn, token, iaa);
                 } else {
                     client = try ga.create(Client);
                     client.init(&conn, token, iaa);
