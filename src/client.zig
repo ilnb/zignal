@@ -167,6 +167,12 @@ pub fn main(init: std.process.Init) !void {
                     try stdout.print("{s}Local error: {s}\n{s}", .{ line_clear, packet.data.err, prompt });
                     try stdout.flush();
                     ui.mutex.unlock(io);
+                } else if (packet.data == .name and msg[0] == 'W') {
+                    try ui.mutex.lock(io);
+                    ui.prompt_vis = true;
+                    try stdout.print("{s}name: {s}, rid: {d}\n{s}", .{ line_clear, state.name, state.rid, prompt });
+                    try stdout.flush();
+                    ui.mutex.unlock(io);
                 } else {
                     try ui.mutex.lock(io);
                     ui.prompt_vis = false;
