@@ -1,6 +1,6 @@
 # Zignal
 
-A simple LAN chatting server written in Zig.
+A simple LAN chatting app written in Zig.
 
 ## Features
 - Basic runtime client identification
