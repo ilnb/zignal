@@ -129,20 +129,20 @@ pub const Server = struct {
     io: Io,
 
     pub fn deinit(self: *Self) void {
-        const aa = self.ga;
+        const ga = self.ga;
         const tokens = &self.tokens;
         const clients = &self.clients;
         const links = &self.links;
         for (tokens.items) |token| {
-            aa.free(token.id);
-            aa.free(token.name);
+            ga.free(token.id);
+            ga.free(token.name);
         }
         for (clients.items) |c| {
-            c.active.deinit(aa);
-            aa.destroy(c);
+            c.active.deinit(ga);
+            ga.destroy(c);
         }
-        tokens.deinit(aa);
-        clients.deinit(aa);
+        tokens.deinit(ga);
+        clients.deinit(ga);
         var itr = links.iterator();
         while (itr.next()) |e| e.value_ptr.deinit();
         links.deinit();
