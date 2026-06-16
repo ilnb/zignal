@@ -128,6 +128,13 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
                     defer client.writer_mutex.unlock(io);
                     try client.sendData(w, Data{ .err = e }) orelse return;
                     return;
+                } else if (!c.online) {
+                    const e = try allocPrint(aa, "ERR: Client {d} is offline.", .{c.rid});
+                    defer aa.free(e);
+                    try client.writer_mutex.lock(io);
+                    defer client.writer_mutex.unlock(io);
+                    try client.sendData(w, Data{ .err = e }) orelse return;
+                    return;
                 }
                 var cw_file = c.conn.writer(io, &buf);
                 const cw = &cw_file.interface;
