@@ -47,7 +47,7 @@ pub fn parsePacket(state: *State, msg: []const u8) !?Packet {
         return Packet{
             .rid = state.rid,
             .data = .{
-                .echo = try state.aa.dupe(u8, to_echo),
+                .echo = try state.aa.dupe(u8, std.mem.trim(u8, to_echo, " ")),
             },
         };
     } else if (eql(u8, header, "WHOAMI")) {
