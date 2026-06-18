@@ -271,7 +271,6 @@ const Client = State.SClient;
 const Token = types.Token;
 const Set = types.Set;
 const Packet = types.Packet;
-const PacketType = types.PacketType;
 const server_mod = @import("server");
 const utils = @import("utils");
 const checkLock = utils.checkLock;

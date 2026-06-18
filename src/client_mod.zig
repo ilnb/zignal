@@ -232,7 +232,6 @@ const net = std.Io.net;
 const bufPrint = std.fmt.bufPrint;
 const types = @import("types");
 const Packet = types.Packet;
-const PacketType = types.PacketType;
 const State = types.CClient;
 const utils = @import("utils");
 const checkLock = utils.checkLock;

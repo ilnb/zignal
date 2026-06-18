@@ -361,7 +361,6 @@ const utils = @import("utils");
 const types = @import("types");
 const State = types.CClient;
 const Packet = types.Packet;
-const PacketType = types.PacketType;
 const Stringify = std.json.Stringify;
 
 pub const UiState = struct {

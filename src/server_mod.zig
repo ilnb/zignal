@@ -390,7 +390,6 @@ const State = types.Server;
 const Client = State.SClient;
 const Token = types.Token;
 const Packet = types.Packet;
-const PacketType = types.PacketType;
 const Data = Packet.Data;
 const utils = @import("utils");
 const bufPrint = std.fmt.bufPrint;
