@@ -69,36 +69,19 @@ pub const Server = struct {
         }
 
         pub inline fn errWrite(self: *const Client, w: *Writer, comptime fmt: []const u8, args: anytype) ?void {
-            const res = std.fmt.allocPrint(self.ga, fmt, args) catch |err| {
-                info("Write failed to {d}: {any}", .{ self.rid, err });
-                return null;
-            };
-            defer self.ga.free(res);
-            self.errWriteAll(w, res) orelse return;
+            return errWrite_(self, w, fmt, args);
         }
 
         pub inline fn errWriteAll(self: *const Client, w: *Writer, msg: []const u8) ?void {
-            w.print("{d} {s}", .{ msg.len, msg }) catch |err| {
-                info("Write failed to {d}: {any}", .{ self.rid, err });
-                return null;
-            };
+            return errWriteAll_(self, w, msg);
         }
 
         pub inline fn errFlush(self: *const Client, w: *Writer) ?void {
-            w.flush() catch |err| {
-                info("Flush failed to {d}: {any}", .{ self.rid, err });
-                return null;
-            };
+            return errFlush_(self, w);
         }
 
         pub inline fn sendData(self: *const Client, w: *Writer, data: Packet.Data) !?void {
-            const msg = try std.json.Stringify.valueAlloc(self.ga, Packet{
-                .rid = self.rid,
-                .data = data,
-            }, .{ .whitespace = .indent_2 });
-            defer self.ga.free(msg);
-            self.errWriteAll(w, msg) orelse return null;
-            self.errFlush(w) orelse return null;
+            return sendData_(self, w, data);
         }
 
         pub inline fn wSendData(ga: Allocator, w: *Writer, data: Packet.Data) !?void {
@@ -186,7 +169,82 @@ pub const GClient = struct {
         }
         self.clients.deinit(aa);
     }
+
+    pub inline fn errWrite(self: *const Self, w: *Writer, comptime fmt: []const u8, args: anytype) ?void {
+        return errWrite_(self, w, fmt, args);
+    }
+
+    pub inline fn errWriteAll(self: *const Self, w: *Writer, msg: []const u8) ?void {
+        return errWriteAll_(self, w, msg);
+    }
+
+    pub inline fn errFlush(self: *const Self, w: *Writer) ?void {
+        return errFlush_(self, w);
+    }
+
+    pub inline fn sendData(self: *const Self, w: *Writer, data: Packet.Data) !?void {
+        return sendData_(self, w, data);
+    }
 };
+
+fn errWrite_(self: anytype, w: *Writer, comptime fmt: []const u8, args: anytype) ?void {
+    var T = @TypeOf(self);
+    const iT = @typeInfo(T);
+    if (iT == .pointer) T = iT.pointer.child;
+
+    var aa: Allocator = undefined;
+    if (@hasField(T, "aa")) {
+        aa = self.aa;
+    } else if (@hasField(T, "ga")) {
+        aa = self.ga;
+    } else {
+        @compileError("No aa or ga field for allocator");
+    }
+
+    const res = std.fmt.allocPrint(aa, fmt, args) catch |err| {
+        info("Write failed to {d}: {any}", .{ self.rid, err });
+        return null;
+    };
+    defer aa.free(res);
+    self.errWriteAll(w, res) orelse return;
+}
+
+fn errWriteAll_(self: anytype, w: *Writer, msg: []const u8) ?void {
+    w.print("{d} {s}", .{ msg.len, msg }) catch |err| {
+        info("Write failed to {d}: {any}", .{ self.rid, err });
+        return null;
+    };
+}
+
+fn errFlush_(self: anytype, w: *Writer) ?void {
+    w.flush() catch |err| {
+        info("Flush failed to {d}: {any}", .{ self.rid, err });
+        return null;
+    };
+}
+
+fn sendData_(self: anytype, w: *Writer, data: Packet.Data) !?void {
+    comptime var T = @TypeOf(self);
+    const iT = @typeInfo(T);
+    if (iT == .pointer) T = iT.pointer.child;
+
+    var aa: Allocator = undefined;
+    if (@hasField(T, "aa")) {
+        aa = self.aa;
+    } else if (@hasField(T, "ga")) {
+        aa = self.ga;
+    } else {
+        @compileError("No aa or ga field for allocator");
+    }
+
+    const msg = try std.json.Stringify.valueAlloc(aa, Packet{
+        .rid = self.rid,
+        .data = data,
+    }, .{ .whitespace = .indent_2 });
+    defer aa.free(msg);
+    self.errWriteAll(w, msg) orelse return null;
+    self.errFlush(w) orelse return null;
+}
 
 const std = @import("std");
 const Io = std.Io;
