@@ -124,7 +124,7 @@ pub fn main(init: std.process.Init) !void {
             defer ga.free(res);
             var c_writer = conn.writer(io, &buf);
             const w = &c_writer.interface;
-            try Client.wSendData(state.aa, w, Packet.Data{
+            try Client.wSendData(state.aa, w, .{
                 .err = res,
             }) orelse continue;
             continue;
@@ -190,17 +190,27 @@ pub fn main(init: std.process.Init) !void {
                 @branchHint(.unlikely);
                 continue;
             }
-            const new_user = try std.json.Stringify.valueAlloc(state.ga, Packet{
-                .rid = c.rid,
-                .data = .{ .new_user = .{ .rid = client.rid, .name = client.name } },
-            }, .{ .whitespace = .indent_2 });
-            defer ga.free(new_user);
-            try c.writer_mutex.lock(io);
-            defer c.writer_mutex.unlock(io);
-            var cwriter = c.conn.writer(io, &buf);
-            const cw = &cwriter.interface;
-            c.errWriteAll(cw, new_user) orelse continue;
-            c.errFlush(cw) orelse continue;
+            if (c.online) {
+                try c.writer_mutex.lock(io);
+                defer c.writer_mutex.unlock(io);
+                var cwriter = c.conn.writer(io, &buf);
+                const cw = &cwriter.interface;
+                try c.sendData(cw, .{
+                    .new_user = .{
+                        .rid = client.rid,
+                        .name = client.name,
+                        .online = true,
+                    },
+                }) orelse continue;
+            }
+
+            try client.sendData(w, .{
+                .new_user = .{
+                    .rid = c.rid,
+                    .name = c.name,
+                    .online = c.online,
+                },
+            }) orelse continue;
         }
 
         _ = try std.Thread.spawn(.{}, server_mod.handleClient, .{ client, &state });

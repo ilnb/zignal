@@ -1,6 +1,27 @@
 pub fn handleClient(client: *Client, state: *State) !void {
     var buf: [1024]u8 = undefined;
-    defer client.online = false;
+    defer {
+        client.online = false;
+        for (state.clients.items) |cl| {
+            if (cl.rid == client.rid) {
+                @branchHint(.unlikely);
+                continue;
+            }
+            cl.writer_mutex.lock(state.io) catch continue;
+            defer cl.writer_mutex.unlock(state.io);
+
+            var cwriter = cl.conn.writer(state.io, &buf);
+            const cw = &cwriter.interface;
+            cl.sendData(cw, .{
+                .update_user = .{
+                    .rid = client.rid,
+                    .name = client.name,
+                    .online = client.online,
+                },
+            }) catch continue orelse continue;
+        }
+        // cleanupClient(client, state) catch {};
+    }
     const conn = client.conn;
     info("Accepted connection from {f}, {d}", .{ conn.socket.address, client.rid });
 
@@ -85,6 +106,24 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
             try client.writer_mutex.lock(io);
             defer client.writer_mutex.unlock(io);
             try client.sendData(w, parsed_value.data) orelse return;
+            for (state.clients.items) |cl| {
+                if (cl.rid == client.rid) {
+                    @branchHint(.unlikely);
+                    continue;
+                }
+                try cl.writer_mutex.lock(io);
+                defer cl.writer_mutex.unlock(io);
+
+                var cwriter = cl.conn.writer(io, &buf);
+                const cw = &cwriter.interface;
+                cl.sendData(cw, .{
+                    .update_user = .{
+                        .rid = client.rid,
+                        .name = client.name,
+                        .online = client.online,
+                    },
+                }) catch continue orelse continue;
+            }
         },
         .link => |p| {
             try state.mutex.lock(io);
