@@ -135,7 +135,7 @@ pub fn Set(T: type) type {
             }
         }
 
-        pub fn contains(self: *Self, key: T) ?*Node {
+        pub fn find(self: *Self, key: T) ?*Node {
             var node = self.root;
             while (node) |n| {
                 const order = self.cmp(n.key, key);

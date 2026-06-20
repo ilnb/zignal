@@ -1,11 +1,10 @@
 pub fn handleClient(client: *Client, state: *State) !void {
-    // defer cleanupClient(client, state) catch {};
+    var buf: [1024]u8 = undefined;
     defer client.online = false;
     const conn = client.conn;
     info("Accepted connection from {f}, {d}", .{ conn.socket.address, client.rid });
 
-    var read_buf: [1024]u8 = undefined;
-    var reader_file = conn.reader(state.io, &read_buf);
+    var reader_file = conn.reader(state.io, &buf);
     const r = &reader_file.interface;
 
     while (true) {
@@ -70,6 +69,7 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
                 }) orelse return;
                 return;
             };
+            if (eql(u8, token.name, name)) return;
             state.ga.free(token.name);
             token.name = state.ga.dupe(u8, name) catch |err| {
                 info("Failed to set name for {d}: {any}", .{ client.rid, err });
@@ -121,7 +121,7 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
                     return;
                 };
                 const c = state.clients.items[i];
-                if (state.links.getPtr(client.rid).?.contains(c.rid) == null) {
+                if (state.links.getPtr(client.rid).?.find(c.rid) == null) {
                     const e = try allocPrint(aa, "ERR: Not connected to {d}.", .{c.rid});
                     defer aa.free(e);
                     try client.writer_mutex.lock(io);
@@ -212,7 +212,7 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
             defer client.writer_mutex.unlock(io);
             try client.sendData(w, Data{ .err = p }) orelse return;
         },
-        .init, .new_user, .users => {},
+        else => {},
     }
 }
 
@@ -226,6 +226,7 @@ inline fn getInfo(c: *Client, state: *State) !Packet.Infos {
         .rid = c.rid,
         .name = c.name,
         .links = try links_arr.toOwnedSlice(state.aa),
+        .online = c.online,
     };
 }
 
@@ -243,7 +244,7 @@ fn linkClients(client1: *Client, client2: *Client, state: *State) !void {
         return;
     };
 
-    if (f.contains(id2) != null) return;
+    if (f.find(id2) != null) return;
     f.put(id2) catch |err| {
         info("Error when connecting {d}: {any}", .{ id1, err });
         return;
@@ -286,7 +287,7 @@ fn unlinkClients(client1: *Client, client2: *Client, state: *State) !void {
         return;
     };
 
-    if (f.contains(id2) == null) return;
+    if (f.find(id2) == null) return;
     f.remove(id2);
     s.remove(id1);
 

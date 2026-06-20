@@ -11,6 +11,7 @@ pub const PacketType = enum {
     init,
     name,
     new_user,
+    update_user,
     link,
     msg,
     users,
@@ -24,12 +25,14 @@ pub const Packet = struct {
         rid: usize,
         name: []u8,
         links: []usize,
+        online: bool,
     };
     pub const Data = union(PacketType) {
         echo: []const u8,
         init: []u8,
         name: []u8,
         new_user: Info,
+        update_user: Info,
         link: struct {
             with: []u8,
             invert: bool = false,
@@ -142,25 +145,28 @@ pub const CClient = struct {
 pub const GClient = struct {
     const Self = @This();
     pub const Client = struct {
-        connected: bool = false,
-        title: []u8,
-        rid: usize,
         msgs: AL(Msg) = .empty,
         input: AL(u8) = .empty,
+        title: []u8,
+        rid: usize,
+        connected: bool = false,
+        online: bool,
     };
-    pub const Info = struct { rid: usize, name: []u8 };
+    pub const Info = struct { rid: usize, name: []u8, online: bool };
     pub const Msg = struct { rid: usize, buf: []u8 };
 
     rid: usize = undefined,
     name: ?[]u8 = null,
     clients: AL(Client) = .empty,
-    clients_mutex: Mutex = .init,
+    cset: Set(usize),
+    aa: Allocator,
     ga: Allocator,
     io: Io,
 
     pub inline fn deinit(self: *Self) void {
         const aa = self.ga;
         if (self.name) |name| aa.free(name);
+        self.cset.deinit();
         for (self.clients.items) |*c| {
             aa.free(c.title);
             for (c.msgs.items) |*msg| aa.free(msg.buf);
