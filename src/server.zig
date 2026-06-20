@@ -2,7 +2,7 @@ var running = std.atomic.Value(bool).init(true);
 
 pub fn handleSig(sig: posix.SIG) callconv(.c) void {
     _ = sig;
-    running.store(false, .release);
+    if (!running.swap(false, .acq_rel)) return;
 }
 
 pub fn main(init: std.process.Init) !void {
@@ -267,7 +267,7 @@ const bufPrint = std.fmt.bufPrint;
 const info = std.log.info;
 const types = @import("types");
 const State = types.Server;
-const Client = State.SClient;
+const Client = State.Client;
 const Token = types.Token;
 const Set = types.Set;
 const Packet = types.Packet;

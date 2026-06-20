@@ -49,17 +49,17 @@ pub const Packet = struct {
 
 pub const Server = struct {
     const Self = @This();
-    pub const SClient = struct {
+    pub const Client = struct {
         rid: usize,
         conn: net.Stream,
         name: []u8, // non owning ref
         online: bool = true,
         writer_mutex: Mutex = .init,
-        active: AL(*SClient) = .empty,
+        active: AL(*Client) = .empty,
         active_mutex: Mutex = .init,
         ga: Allocator,
 
-        pub inline fn init(self: *SClient, conn: *const net.Stream, token: *Token, aa: Allocator) void {
+        pub inline fn init(self: *Client, conn: *const net.Stream, token: *Token, aa: Allocator) void {
             self.* = .{
                 .rid = token.rid.?,
                 .conn = conn.*,
@@ -68,7 +68,7 @@ pub const Server = struct {
             };
         }
 
-        pub inline fn errWrite(self: *const SClient, w: *Writer, comptime fmt: []const u8, args: anytype) ?void {
+        pub inline fn errWrite(self: *const Client, w: *Writer, comptime fmt: []const u8, args: anytype) ?void {
             const res = std.fmt.allocPrint(self.ga, fmt, args) catch |err| {
                 info("Write failed to {d}: {any}", .{ self.rid, err });
                 return null;
@@ -77,21 +77,21 @@ pub const Server = struct {
             self.errWriteAll(w, res) orelse return;
         }
 
-        pub inline fn errWriteAll(self: *const SClient, w: *Writer, msg: []const u8) ?void {
+        pub inline fn errWriteAll(self: *const Client, w: *Writer, msg: []const u8) ?void {
             w.print("{d} {s}", .{ msg.len, msg }) catch |err| {
                 info("Write failed to {d}: {any}", .{ self.rid, err });
                 return null;
             };
         }
 
-        pub inline fn errFlush(self: *const SClient, w: *Writer) ?void {
+        pub inline fn errFlush(self: *const Client, w: *Writer) ?void {
             w.flush() catch |err| {
                 info("Flush failed to {d}: {any}", .{ self.rid, err });
                 return null;
             };
         }
 
-        pub inline fn sendData(self: *const SClient, w: *Writer, data: Packet.Data) !?void {
+        pub inline fn sendData(self: *const Client, w: *Writer, data: Packet.Data) !?void {
             const msg = try std.json.Stringify.valueAlloc(self.ga, Packet{
                 .rid = self.rid,
                 .data = data,
@@ -119,7 +119,7 @@ pub const Server = struct {
         }
     };
 
-    clients: AL(*SClient) = .empty,
+    clients: AL(*Client) = .empty,
     links: HM(usize, Set(usize)),
     mutex: Mutex = .init,
     profile_dir: Io.Dir,
@@ -159,15 +159,16 @@ pub const CClient = struct {
 pub const GClient = struct {
     const Self = @This();
     pub const Client = struct {
-        connected: bool,
+        connected: bool = false,
         title: []u8,
         rid: usize,
-        msgs: AL(Msg),
-        input: AL(u8),
+        msgs: AL(Msg) = .empty,
+        input: AL(u8) = .empty,
     };
     pub const Info = struct { rid: usize, name: []u8 };
     pub const Msg = struct { rid: usize, buf: []u8 };
 
+    rid: usize = undefined,
     name: ?[]u8 = null,
     clients: AL(Client) = .empty,
     clients_mutex: Mutex = .init,

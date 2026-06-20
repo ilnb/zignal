@@ -8,7 +8,7 @@ var io: Io = undefined;
 
 pub fn handleSig(sig: posix.SIG) callconv(.c) void {
     _ = sig;
-    running.store(false, .release);
+    if (!running.swap(false, .acq_rel)) return;
     stream.shutdown(io, .recv) catch {};
     File.stdin().close(io);
 }
