@@ -181,7 +181,7 @@ pub fn parsePacket(state: *State, msg: []const u8) !?Packet {
     };
 }
 
-pub fn formatUsers(state: *const State, users: []const Packet.Infos) ![]u8 {
+pub fn formatUsers(state: *const State, users: []const Data.Infos) ![]u8 {
     const rid = state.rid;
     const aa = state.aa;
 
@@ -232,6 +232,7 @@ const net = std.Io.net;
 const bufPrint = std.fmt.bufPrint;
 const types = @import("types");
 const Packet = types.Packet;
+const Data = types.Data;
 const State = types.CClient;
 const utils = @import("utils");
 const checkLock = utils.checkLock;

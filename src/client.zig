@@ -335,7 +335,7 @@ fn recvFn(r: *Io.Reader, stdout: *Io.Writer, state: *State) !void {
             .err => |e| {
                 try printMsg(e, stdout);
             },
-            .new_user => {},
+            .new_user, .update_user => {},
             else => unreachable,
         }
     }

@@ -19,7 +19,7 @@ pub const PacketType = enum {
     err,
 };
 
-pub const Packet = struct {
+pub const Data = union(PacketType) {
     const Info = GClient.Info;
     pub const Infos = struct {
         rid: usize,
@@ -27,25 +27,25 @@ pub const Packet = struct {
         links: []usize,
         online: bool,
     };
-    pub const Data = union(PacketType) {
-        echo: []const u8,
-        init: []u8,
-        name: []u8,
-        new_user: Info,
-        update_user: Info,
-        link: struct {
-            with: []u8,
-            invert: bool = false,
-        },
-        msg: struct {
-            peer: ?[]u8 = null,
-            buf: []u8,
-        },
-        users: []Infos,
-        to_get: [][]u8,
-        err: []const u8,
-    };
+    echo: []const u8,
+    init: []u8,
+    name: []u8,
+    new_user: Info,
+    update_user: Info,
+    link: struct {
+        with: []u8,
+        invert: bool = false,
+    },
+    msg: struct {
+        peer: ?[]u8 = null,
+        buf: []u8,
+    },
+    users: []Infos,
+    to_get: [][]u8,
+    err: []const u8,
+};
 
+pub const Packet = struct {
     rid: usize,
     data: Data,
 };
@@ -62,7 +62,7 @@ pub const Server = struct {
         active_mutex: Mutex = .init,
         ga: Allocator,
 
-        pub inline fn init(self: *Client, conn: *const net.Stream, token: *Token, aa: Allocator) void {
+        pub inline fn init(self: *Client, conn: *const net.Stream, token: *const Token, aa: Allocator) void {
             self.* = .{
                 .rid = token.rid.?,
                 .conn = conn.*,
@@ -83,11 +83,11 @@ pub const Server = struct {
             return errFlush_(self, w);
         }
 
-        pub inline fn sendData(self: *const Client, w: *Writer, data: Packet.Data) !?void {
+        pub inline fn sendData(self: *const Client, w: *Writer, data: Data) !?void {
             return sendData_(self, w, data);
         }
 
-        pub inline fn wSendData(ga: Allocator, w: *Writer, data: Packet.Data) !?void {
+        pub inline fn wSendData(ga: Allocator, w: *Writer, data: Data) !?void {
             const rid = std.math.maxInt(usize);
             const msg = try std.json.Stringify.valueAlloc(ga, Packet{
                 .rid = rid,
@@ -188,7 +188,7 @@ pub const GClient = struct {
         return errFlush_(self, w);
     }
 
-    pub inline fn sendData(self: *const Self, w: *Writer, data: Packet.Data) !?void {
+    pub inline fn sendData(self: *const Self, w: *Writer, data: Data) !?void {
         return sendData_(self, w, data);
     }
 };
@@ -229,7 +229,7 @@ fn errFlush_(self: anytype, w: *Writer) ?void {
     };
 }
 
-fn sendData_(self: anytype, w: *Writer, data: Packet.Data) !?void {
+fn sendData_(self: anytype, w: *Writer, data: Data) !?void {
     comptime var T = @TypeOf(self);
     const iT = @typeInfo(T);
     if (iT == .pointer) T = iT.pointer.child;

@@ -18,7 +18,7 @@ pub fn handleClient(client: *Client, state: *State) !void {
                     .name = client.name,
                     .online = client.online,
                 },
-            }) catch continue orelse continue;
+            }) catch break orelse continue;
         }
         // cleanupClient(client, state) catch {};
     }
@@ -215,7 +215,7 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
         },
         .to_get => |p| {
             try state.mutex.lock(io);
-            var arr: std.ArrayList(Packet.Infos) = try .initCapacity(aa, p.len);
+            var arr: std.ArrayList(Data.Infos) = try .initCapacity(aa, p.len);
             errdefer arr.deinit(aa);
             if (p.len != 0) {
                 for (p) |c2| {
@@ -255,7 +255,7 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
     }
 }
 
-inline fn getInfo(c: *Client, state: *State) !Packet.Infos {
+inline fn getInfo(c: *Client, state: *State) !Data.Infos {
     const links = state.links.getPtr(c.rid).?;
     var itr = links.iterator();
     var links_arr: std.ArrayList(usize) = try .initCapacity(state.aa, links.count);
@@ -430,7 +430,7 @@ const State = types.Server;
 const Client = State.Client;
 const Token = types.Token;
 const Packet = types.Packet;
-const Data = Packet.Data;
+const Data = types.Data;
 const utils = @import("utils");
 const bufPrint = std.fmt.bufPrint;
 const allocPrint = std.fmt.allocPrint;
