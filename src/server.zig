@@ -185,6 +185,8 @@ pub fn main(init: std.process.Init) !void {
             continue;
         };
 
+        var present_links: std.ArrayList(types.Data.UpdateInfo.LinkType) = .empty;
+        defer present_links.deinit(aa);
         for (state.clients.items) |c| {
             if (c == client) {
                 @branchHint(.unlikely);
@@ -212,15 +214,16 @@ pub fn main(init: std.process.Init) !void {
                 },
             }) orelse continue;
 
-            if (state.links.getPtr(c.rid).?.find(client.rid) != null) try client.sendData(w, .{
-                .update_user = .{
-                    .rid = c.rid,
-                    .links = &.{
-                        .{ .add = true, .rid = client.rid },
-                    },
-                },
-            }) orelse continue;
+            if (state.links.getPtr(c.rid).?.find(client.rid) != null) {
+                try present_links.append(aa, .{ .add = true, .rid = c.rid });
+            }
         }
+        try client.sendData(w, .{
+            .update_user = .{
+                .rid = client.rid,
+                .links = present_links.items[0..present_links.items.len],
+            },
+        }) orelse continue;
 
         _ = try std.Thread.spawn(.{}, server_mod.handleClient, .{ client, &state });
     }
