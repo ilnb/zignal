@@ -27,11 +27,18 @@ pub const Data = union(PacketType) {
         links: []usize,
         online: bool,
     };
+    pub const UpdateInfo = struct {
+        pub const LinkType = struct { add: bool, rid: usize };
+        rid: usize,
+        name: ?[]u8 = null,
+        links: ?[]const LinkType = null,
+        online: ?bool = null,
+    };
     echo: []const u8,
     init: []u8,
     name: []u8,
     new_user: Info,
-    update_user: Info,
+    update_user: UpdateInfo,
     link: struct {
         with: []u8,
         invert: bool = false,
@@ -147,7 +154,7 @@ pub const GClient = struct {
     pub const Client = struct {
         msgs: AL(Msg) = .empty,
         input: AL(u8) = .empty,
-        title: []u8,
+        name: []u8,
         rid: usize,
         connected: bool = false,
         online: bool,
@@ -168,7 +175,7 @@ pub const GClient = struct {
         if (self.name) |name| aa.free(name);
         self.cset.deinit();
         for (self.clients.items) |*c| {
-            aa.free(c.title);
+            aa.free(c.name);
             for (c.msgs.items) |*msg| aa.free(msg.buf);
             c.msgs.deinit(aa);
             c.input.deinit(aa);

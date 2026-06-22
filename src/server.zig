@@ -7,9 +7,9 @@ pub fn handleSig(sig: posix.SIG) callconv(.c) void {
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
-    const iaa = init.arena.allocator();
+    const aa = init.arena.allocator();
     const ga = init.gpa;
-    const args = try init.minimal.args.toSlice(iaa);
+    const args = try init.minimal.args.toSlice(aa);
 
     var profile: []const u8 = "default";
     var port: u16 = 8000;
@@ -82,7 +82,7 @@ pub fn main(init: std.process.Init) !void {
     var state = State{
         .links = std.AutoHashMap(usize, Set(usize)).init(ga),
         .ga = ga,
-        .aa = iaa,
+        .aa = aa,
         .io = io,
         .profile_dir = profile_dir,
     };
@@ -139,7 +139,7 @@ pub fn main(init: std.process.Init) !void {
                 token.rid = id;
                 id += 1;
                 client = try ga.create(Client);
-                client.init(&conn, token, iaa);
+                client.init(&conn, token, aa);
                 try state.tokens.append(state.ga, token.*);
                 try state.links.put(token.rid.?, .init(state.ga, utils.usizeCmp));
                 try state.clients.append(state.ga, client);
@@ -162,7 +162,7 @@ pub fn main(init: std.process.Init) !void {
                     client.writer_mutex = .init;
                 } else {
                     client = try ga.create(Client);
-                    client.init(&conn, token, iaa);
+                    client.init(&conn, token, aa);
                     try state.clients.append(state.ga, client);
                     try state.links.put(token.rid.?, .init(state.ga, utils.usizeCmp));
                 }
@@ -209,6 +209,15 @@ pub fn main(init: std.process.Init) !void {
                     .rid = c.rid,
                     .name = c.name,
                     .online = c.online,
+                },
+            }) orelse continue;
+
+            if (state.links.getPtr(c.rid).?.find(client.rid) != null) try client.sendData(w, .{
+                .update_user = .{
+                    .rid = c.rid,
+                    .links = &.{
+                        .{ .add = true, .rid = client.rid },
+                    },
                 },
             }) orelse continue;
         }

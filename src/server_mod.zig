@@ -1,27 +1,6 @@
 pub fn handleClient(client: *Client, state: *State) !void {
     var buf: [1024]u8 = undefined;
-    defer {
-        client.online = false;
-        for (state.clients.items) |cl| {
-            if (cl.rid == client.rid) {
-                @branchHint(.unlikely);
-                continue;
-            }
-            cl.writer_mutex.lock(state.io) catch continue;
-            defer cl.writer_mutex.unlock(state.io);
-
-            var cwriter = cl.conn.writer(state.io, &buf);
-            const cw = &cwriter.interface;
-            cl.sendData(cw, .{
-                .update_user = .{
-                    .rid = client.rid,
-                    .name = client.name,
-                    .online = client.online,
-                },
-            }) catch break orelse continue;
-        }
-        // cleanupClient(client, state) catch {};
-    }
+    // defer cleanupClient(client, state) catch {};
     const conn = client.conn;
     info("Accepted connection from {f}, {d}", .{ conn.socket.address, client.rid });
 
@@ -103,26 +82,18 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
             };
             client.name = token.name;
             info("Named {d} -> {s}", .{ client.rid, name });
-            try client.writer_mutex.lock(io);
-            defer client.writer_mutex.unlock(io);
-            try client.sendData(w, parsed_value.data) orelse return;
-            for (state.clients.items) |cl| {
-                if (cl.rid == client.rid) {
-                    @branchHint(.unlikely);
-                    continue;
-                }
-                try cl.writer_mutex.lock(io);
-                defer cl.writer_mutex.unlock(io);
+            for (state.clients.items) |c| {
+                try c.writer_mutex.lock(io);
+                defer c.writer_mutex.unlock(io);
 
-                var cwriter = cl.conn.writer(io, &buf);
+                var cwriter = c.conn.writer(io, &buf);
                 const cw = &cwriter.interface;
-                cl.sendData(cw, .{
+                try c.sendData(cw, .{
                     .update_user = .{
                         .rid = client.rid,
                         .name = client.name,
-                        .online = client.online,
                     },
-                }) catch continue orelse continue;
+                }) orelse continue;
             }
         },
         .link => |p| {
@@ -137,15 +108,42 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
                 return;
             };
             const c2 = state.clients.items[i];
+            var ret: usize = 0;
             if (!p.invert) {
-                try linkClients(client, c2, state);
+                if (try linkClients(client, c2, state)) ret = 1;
             } else {
-                try unlinkClients(client, c2, state);
+                if (try unlinkClients(client, c2, state)) ret = 2;
             }
             try client.writer_mutex.lock(io);
-            defer client.writer_mutex.unlock(io);
             client.errWriteAll(w, "") orelse return;
             client.errFlush(w) orelse return;
+            client.writer_mutex.unlock(io);
+            if (ret != 0) {
+                const add = ret == 1;
+                for (state.clients.items) |c| {
+                    if (!c.online) continue;
+                    try c.writer_mutex.lock(io);
+                    defer c.writer_mutex.unlock(io);
+                    try c.active_mutex.lock(io);
+                    defer c.active_mutex.unlock(io);
+                    var cwriter = c.conn.writer(io, &buf);
+                    const cw = &cwriter.interface;
+
+                    try c.sendData(cw, .{
+                        .update_user = .{
+                            .rid = client.rid,
+                            .links = &.{.{ .add = add, .rid = c2.rid }},
+                        },
+                    }) orelse continue;
+
+                    try c.sendData(cw, .{
+                        .update_user = .{
+                            .rid = c2.rid,
+                            .links = &.{.{ .add = add, .rid = client.rid }},
+                        },
+                    }) orelse continue;
+                }
+            }
         },
         .msg => |p| {
             if (p.peer) |ibuf| {
@@ -269,28 +267,28 @@ inline fn getInfo(c: *Client, state: *State) !Data.Infos {
     };
 }
 
-fn linkClients(client1: *Client, client2: *Client, state: *State) !void {
+fn linkClients(client1: *Client, client2: *Client, state: *State) !bool {
     const id1 = client1.rid;
     const id2 = client2.rid;
     const links = &state.links;
 
     const f = links.getPtr(id1) orelse {
         info("Invalid id {d}", .{id1});
-        return;
+        return false;
     };
     const s = links.getPtr(id2) orelse {
         info("Invalid id {d}", .{id2});
-        return;
+        return false;
     };
 
-    if (f.find(id2) != null) return;
+    if (f.find(id2) != null) return false;
     f.put(id2) catch |err| {
         info("Error when connecting {d}: {any}", .{ id1, err });
-        return;
+        return false;
     };
     s.put(id1) catch |err| {
         info("Error when connecting {d}: {any}", .{ id2, err });
-        return;
+        return false;
     };
 
     const io = state.io;
@@ -298,35 +296,36 @@ fn linkClients(client1: *Client, client2: *Client, state: *State) !void {
     defer client1.active_mutex.unlock(io);
     client1.active.append(state.ga, client2) catch |err| {
         info("Error appending active {any}", .{err});
-        return;
+        return false;
     };
 
     try client2.active_mutex.lock(io);
     defer client2.active_mutex.unlock(io);
     client2.active.append(state.ga, client1) catch |err| {
         info("Error appending active {any}", .{err});
-        return;
+        return false;
     };
 
     info("Connected {d} and {d}", .{ id1, id2 });
+    return true;
 }
 
-fn unlinkClients(client1: *Client, client2: *Client, state: *State) !void {
-    if (client1 == client2) return;
+fn unlinkClients(client1: *Client, client2: *Client, state: *State) !bool {
+    if (client1 == client2) return false;
     const id1 = client1.rid;
     const id2 = client2.rid;
     const links = &state.links;
 
     const f = links.getPtr(id1) orelse {
         info("Invalid id {d}", .{id1});
-        return;
+        return false;
     };
     const s = links.getPtr(id2) orelse {
         info("Invalid id {d}", .{id2});
-        return;
+        return false;
     };
 
-    if (f.find(id2) == null) return;
+    if (f.find(id2) == null) return false;
     f.remove(id2);
     s.remove(id1);
 
@@ -350,40 +349,62 @@ fn unlinkClients(client1: *Client, client2: *Client, state: *State) !void {
     }
 
     info("Disconnected {d} and {d}", .{ id1, id2 });
+    return true;
 }
 
 fn cleanupClient(client: *Client, state: *State) !void {
     const io = state.io;
-    const id = client.rid;
     try state.mutex.lock(io);
     defer state.mutex.unlock(io);
+    try client.active_mutex.lock(io);
+    defer client.active_mutex.unlock(io);
 
-    const clients = &state.clients;
-    for (clients.items, 0..) |c, i| {
-        if (c == client) {
-            _ = clients.swapRemove(i);
-            break;
+    // const clients = &state.clients;
+    // for (clients.items, 0..) |c, i| {
+    //     if (c == client) {
+    //         _ = clients.swapRemove(i);
+    //         break;
+    //     }
+    // } else {
+    //     info("Client not found in the clients list", .{});
+    // }
+
+    client.online = false;
+    var buf: [1024]u8 = undefined;
+    for (state.clients.items) |c| {
+        if (c.rid == client.rid) {
+            @branchHint(.unlikely);
+            continue;
         }
-    } else {
-        info("Client not found in the clients list", .{});
+        c.writer_mutex.lock(state.io) catch continue;
+        defer c.writer_mutex.unlock(state.io);
+
+        var cwriter = c.conn.writer(state.io, &buf);
+        const cw = &cwriter.interface;
+        c.sendData(cw, .{
+            .update_user = .{
+                .rid = client.rid,
+                .online = client.online,
+            },
+        }) catch break orelse continue;
     }
 
-    const links = &state.links;
-    for (clients.items) |c| {
-        if (c.rid != client.rid) links.getPtr(c.rid).?.remove(id);
-        try c.active_mutex.lock(io);
-        defer c.active_mutex.unlock(io);
-        for (c.active.items, 0..) |c_, i| {
-            if (c_.rid == id) {
-                _ = c.active.swapRemove(i);
-                break;
-            }
-        }
-    }
+    // const links = &state.links;
+    // for (clients.items) |c| {
+    //     if (c.rid != client.rid) links.getPtr(c.rid).?.remove(client.id);
+    //     try c.active_mutex.lock(io);
+    //     defer c.active_mutex.unlock(io);
+    //     for (c.active.items, 0..) |c_, i| {
+    //         if (c_.rid == client.id) {
+    //             _ = c.active.swapRemove(i);
+    //             break;
+    //         }
+    //     }
+    // }
 
-    client.active.deinit(state.ga);
+    // client.active.deinit(state.ga);
+    // state.ga.destroy(client);
     client.conn.close(io);
-    state.ga.destroy(client);
 }
 
 pub const HandshakeResult = union(enum) {
