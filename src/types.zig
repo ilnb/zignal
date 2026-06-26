@@ -28,7 +28,7 @@ pub const Data = union(PacketType) {
         online: bool,
     };
     pub const UpdateInfo = struct {
-        pub const LinkType = struct { add: bool, rid: usize };
+        pub const LinkType = struct { add: bool = true, rid: usize };
         rid: usize,
         name: ?[]u8 = null,
         links: ?[]const LinkType = null,

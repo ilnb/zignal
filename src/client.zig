@@ -30,14 +30,18 @@ pub fn main(init: std.process.Init) !void {
     {
         var i: usize = 1;
         while (i < args.len) : (i += 1) {
-            if (std.mem.eql(u8, args[i], "--profile") or std.mem.eql(u8, args[i], "-P")) {
+            if (std.mem.eql(u8, args[i], "--profile") or
+                std.mem.eql(u8, args[i], "-P"))
+            {
                 if (i + 1 == args.len) {
                     std.debug.print("Missing profile name. Try -h for more information.\n", .{});
                     return;
                 }
                 i += 1;
                 profile = args[i];
-            } else if (std.mem.eql(u8, args[i], "--port") or std.mem.eql(u8, args[i], "-p")) {
+            } else if (std.mem.eql(u8, args[i], "--port") or
+                std.mem.eql(u8, args[i], "-p"))
+            {
                 if (i + 1 == args.len) {
                     std.debug.print("Missing port number. Try -h for more information.\n", .{});
                     return;
@@ -47,7 +51,9 @@ pub fn main(init: std.process.Init) !void {
                     std.debug.print("Error when parsing port number: {any}\n", .{err});
                     return;
                 };
-            } else if (std.mem.eql(u8, args[i], "--help") or std.mem.eql(u8, args[i], "-h")) {
+            } else if (std.mem.eql(u8, args[i], "--help") or
+                std.mem.eql(u8, args[i], "-h"))
+            {
                 std.debug.print("{s}\n", .{help_msg});
                 return;
             } else {

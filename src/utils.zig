@@ -2,14 +2,22 @@ pub fn usizeCmp(a: usize, b: usize) std.math.Order {
     return std.math.order(a, b);
 }
 
-pub fn getClientById(state: *Server, buf: []const u8) ?usize {
+pub inline fn back(slice: anytype) ?std.meta.Child(@TypeOf(slice)) {
+    if (slice.len == 0) {
+        @branchHint(.unlikely);
+        return null;
+    }
+    return slice[slice.len - 1];
+}
+
+pub inline fn getClientById(state: *Server, buf: []const u8) ?usize {
     const id = std.fmt.parseInt(u8, buf, 10) catch return null;
     return for (state.clients.items, 0..) |c, i| {
         if (c.rid == id) break i;
     } else null;
 }
 
-pub fn getClientByName(state: *Server, buf: []const u8) ?usize {
+pub inline fn getClientByName(state: *Server, buf: []const u8) ?usize {
     return for (state.clients.items, 0..) |c, i| {
         if (eql(u8, c.name, buf)) break i;
     } else null;
