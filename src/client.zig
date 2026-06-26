@@ -1,20 +1,21 @@
-var ui = UiState{};
-const prompt = "➜ ";
-const line_clear = "\r\x1b[2K";
-
-var running = std.atomic.Value(bool).init(true);
-var stream: net.Stream = undefined;
-var io: Io = undefined;
+const G = struct {
+    var ui = UiState{};
+    const prompt = "➜ ";
+    const line_clear = "\r\x1b[2K";
+    var running = std.atomic.Value(bool).init(true);
+    var stream: net.Stream = undefined;
+    var io: Io = undefined;
+};
 
 pub fn handleSig(sig: posix.SIG) callconv(.c) void {
     _ = sig;
-    if (!running.swap(false, .acq_rel)) return;
-    stream.shutdown(io, .recv) catch {};
-    File.stdin().close(io);
+    if (!G.running.swap(false, .acq_rel)) return;
+    G.stream.shutdown(G.io, .recv) catch {};
+    File.stdin().close(G.io);
 }
 
 pub fn main(init: std.process.Init) !void {
-    io = init.io;
+    G.io = init.io;
     const aa = init.arena.allocator();
     const args = try init.minimal.args.toSlice(aa);
 
@@ -64,13 +65,13 @@ pub fn main(init: std.process.Init) !void {
     }
 
     const home = init.environ_map.get("HOME").?;
-    var home_dir = try std.Io.Dir.openDirAbsolute(io, home, .{});
-    defer home_dir.close(io);
+    var home_dir = try std.Io.Dir.openDirAbsolute(G.io, home, .{});
+    defer home_dir.close(G.io);
 
     var buf: [128]u8 = undefined;
     const profile_path = try std.fmt.bufPrint(&buf, ".config/zignal/client/{s}", .{profile});
-    var profile_dir = try home_dir.createDirPathOpen(io, profile_path, .{});
-    defer profile_dir.close(io);
+    var profile_dir = try home_dir.createDirPathOpen(G.io, profile_path, .{});
+    defer profile_dir.close(G.io);
 
     utils.checkLock(init.io, &profile_dir) catch |err| {
         if (err != error.EndOfStream) {
@@ -78,31 +79,31 @@ pub fn main(init: std.process.Init) !void {
         }
         return;
     };
-    const lock_file = try profile_dir.createFile(io, "lock", .{});
-    defer profile_dir.deleteFile(io, "lock") catch {};
-    defer lock_file.close(io);
+    const lock_file = try profile_dir.createFile(G.io, "lock", .{});
+    defer profile_dir.deleteFile(G.io, "lock") catch {};
+    defer lock_file.close(G.io);
 
     const pid = std.os.linux.getpid();
     const pid_sl = try std.fmt.bufPrint(&buf, "{d}", .{pid});
-    try lock_file.writeStreamingAll(io, pid_sl);
+    try lock_file.writeStreamingAll(G.io, pid_sl);
 
     const addr = net.IpAddress{ .ip4 = net.Ip4Address.unspecified(port) };
-    stream = try addr.connect(io, .{ .mode = .stream, .protocol = .tcp });
+    G.stream = try addr.connect(G.io, .{ .mode = .stream, .protocol = .tcp });
 
     var wbuf: [1024]u8 = undefined;
-    var writer_file = stream.writer(io, &wbuf);
+    var writer_file = G.stream.writer(G.io, &wbuf);
     const writer = &writer_file.interface;
 
     var rbuf: [1024]u8 = undefined;
-    var reader_file = stream.reader(io, &rbuf);
+    var reader_file = G.stream.reader(G.io, &rbuf);
     const reader = &reader_file.interface;
 
     var stdin_buf: [1024]u8 = undefined;
-    var stdin_reader = File.stdin().reader(io, &stdin_buf);
+    var stdin_reader = File.stdin().reader(G.io, &stdin_buf);
     const stdin = &stdin_reader.interface;
 
     var stdout_buf: [1024]u8 = undefined;
-    var stdout_writer = File.stdout().writer(io, &stdout_buf);
+    var stdout_writer = File.stdout().writer(G.io, &stdout_buf);
     const stdout = &stdout_writer.interface;
 
     const sa = posix.Sigaction{
@@ -113,14 +114,14 @@ pub fn main(init: std.process.Init) !void {
     posix.sigaction(posix.SIG.INT, &sa, null);
     posix.sigaction(posix.SIG.HUP, &sa, null);
 
-    client_mod.handshakeWithServer(&init, profile_dir, &stream) catch |err| {
+    client_mod.handshakeWithServer(&init, profile_dir, &G.stream) catch |err| {
         std.debug.print("Handshake failed with {any}.\n", .{err});
         return;
     };
 
     var state: State = .{
         .aa = aa,
-        .io = io,
+        .io = G.io,
     };
 
     const recv_thread = std.Thread.spawn(.{}, recvFn, .{ reader, stdout, &state }) catch |err| {
@@ -132,58 +133,58 @@ pub fn main(init: std.process.Init) !void {
     var fds = [_]posix.pollfd{
         .{ .fd = File.stdin().handle, .events = posix.POLL.IN, .revents = 0 },
     };
-    while (running.load(.acquire)) {
-        try ui.mutex.lock(io);
+    while (G.running.load(.acquire)) {
+        try G.ui.mutex.lock(G.io);
         const timeout = 50;
-        while (ui.pending) {
-            timedWait(&ui.cond, &ui.mutex, timeout) catch |err| {
-                if (err == error.Timeout) ui.pending = false;
+        while (G.ui.pending) {
+            timedWait(&G.ui.cond, &G.ui.mutex, timeout) catch |err| {
+                if (err == error.Timeout) G.ui.pending = false;
             };
         }
-        if (!ui.prompt_vis) {
-            try stdout.writeAll(prompt);
+        if (!G.ui.prompt_vis) {
+            try stdout.writeAll(G.prompt);
             try stdout.flush();
-            ui.prompt_vis = true;
+            G.ui.prompt_vis = true;
         }
-        ui.mutex.unlock(io);
+        G.ui.mutex.unlock(G.io);
 
         fds[0].revents = 0;
         if (posix.poll(&fds, 100) catch break == 0) continue;
         if (fds[0].revents & (posix.POLL.ERR | posix.POLL.HUP | posix.POLL.NVAL) != 0) {
-            running.store(false, .release);
+            G.running.store(false, .release);
             break;
         }
         if (fds[0].revents & posix.POLL.IN == 0) continue;
 
         const msg = stdin.takeDelimiter('\n') catch |err| {
-            if (!running.load(.acquire)) break;
+            if (!G.running.load(.acquire)) break;
             return err;
         } orelse {
-            running.store(false, .release);
-            ui.cond.signal(io);
-            try stream.shutdown(io, .recv);
+            G.running.store(false, .release);
+            G.ui.cond.signal(G.io);
+            try G.stream.shutdown(G.io, .recv);
             break;
         };
 
         if (msg.len > 0) {
             if (try client_mod.parsePacket(&state, msg)) |packet| {
                 if (packet.data == .err) {
-                    try ui.mutex.lock(io);
-                    ui.prompt_vis = true;
-                    try stdout.print("{s}Local error: {s}\n{s}", .{ line_clear, packet.data.err, prompt });
+                    try G.ui.mutex.lock(G.io);
+                    G.ui.prompt_vis = true;
+                    try stdout.print("{s}Local error: {s}\n{s}", .{ G.line_clear, packet.data.err, G.prompt });
                     try stdout.flush();
-                    ui.mutex.unlock(io);
+                    G.ui.mutex.unlock(G.io);
                 } else if (packet.data == .name and std.mem.find(u8, msg, "WHOAMI") != null) {
-                    try ui.mutex.lock(io);
-                    ui.prompt_vis = true;
-                    try stdout.print("{s}name: {s}, rid: {d}\n{s}", .{ line_clear, state.name, state.rid, prompt });
+                    try G.ui.mutex.lock(G.io);
+                    G.ui.prompt_vis = true;
+                    try stdout.print("{s}name: {s}, rid: {d}\n{s}", .{ G.line_clear, state.name, state.rid, G.prompt });
                     try stdout.flush();
-                    ui.mutex.unlock(io);
+                    G.ui.mutex.unlock(G.io);
                 } else {
-                    try ui.mutex.lock(io);
-                    ui.prompt_vis = false;
-                    ui.pending = true;
-                    ui.mutex.unlock(io);
+                    try G.ui.mutex.lock(G.io);
+                    G.ui.prompt_vis = false;
+                    G.ui.pending = true;
+                    G.ui.mutex.unlock(G.io);
 
                     const to_send = try Stringify.valueAlloc(state.aa, packet, .{ .whitespace = .indent_2 });
                     defer state.aa.free(to_send);
@@ -210,21 +211,21 @@ pub fn main(init: std.process.Init) !void {
                     else => unreachable,
                 }
             } else {
-                try ui.mutex.lock(io);
-                ui.prompt_vis = true;
-                try stdout.print("{s}{s}", .{ line_clear, prompt });
+                try G.ui.mutex.lock(G.io);
+                G.ui.prompt_vis = true;
+                try stdout.print("{s}{s}", .{ G.line_clear, G.prompt });
                 try stdout.flush();
-                ui.mutex.unlock(io);
+                G.ui.mutex.unlock(G.io);
             }
         } else {
-            try ui.mutex.lock(io);
-            ui.prompt_vis = true;
-            try stdout.print("{s}{s}", .{ line_clear, prompt });
+            try G.ui.mutex.lock(G.io);
+            G.ui.prompt_vis = true;
+            try stdout.print("{s}{s}", .{ G.line_clear, G.prompt });
             try stdout.flush();
-            ui.mutex.unlock(io);
+            G.ui.mutex.unlock(G.io);
         }
     }
-    try stdout.print("{s}Closing the client\n", .{line_clear});
+    try stdout.print("{s}Closing the client\n", .{G.line_clear});
     try stdout.flush();
 }
 
@@ -234,17 +235,17 @@ fn timedWait(cond: *Io.Condition, mutex: *Io.Mutex, timeout_ms: i64) !void {
         const prev_state = cond.state.fetchAdd(.{ .waiters = 1, .signals = 0 }, .monotonic);
         std.debug.assert(prev_state.waiters < std.math.maxInt(u16));
     }
-    mutex.unlock(io);
-    defer mutex.lockUncancelable(io);
+    mutex.unlock(G.io);
+    defer mutex.lockUncancelable(G.io);
 
     const wall_clock = Io.Clock.awake;
-    const now = Io.Clock.now(wall_clock, io);
+    const now = Io.Clock.now(wall_clock, G.io);
     const deadline = now.addDuration(.fromMilliseconds(timeout_ms));
 
     const timeout = Io.Timeout{ .deadline = .{ .raw = deadline, .clock = wall_clock } };
 
     while (true) {
-        const result = io.futexWaitTimeout(u32, &cond.epoch.raw, epoch, timeout);
+        const result = G.io.futexWaitTimeout(u32, &cond.epoch.raw, epoch, timeout);
         epoch = cond.epoch.load(.acquire);
 
         var prev_state = cond.state.load(.monotonic);
@@ -265,42 +266,42 @@ fn timedWait(cond: *Io.Condition, mutex: *Io.Mutex, timeout_ms: i64) !void {
 
 fn recvFn(r: *Io.Reader, stdout: *Io.Writer, state: *State) !void {
     const aa = state.aa;
-    while (running.load(.acquire)) {
+    while (G.running.load(.acquire)) {
         const slen = r.takeDelimiter(' ') catch |err| {
-            std.debug.print("{s}Error when receiving: {any}\n", .{ line_clear, err });
-            running.store(false, .release);
-            ui.cond.signal(io);
+            std.debug.print("{s}Error when receiving: {any}\n", .{ G.line_clear, err });
+            G.running.store(false, .release);
+            G.ui.cond.signal(G.io);
             break;
         } orelse {
-            if (running.load(.acquire)) {
-                std.debug.print("{s}EOF\n", .{line_clear});
-                running.store(false, .release);
-                ui.cond.signal(io);
+            if (G.running.load(.acquire)) {
+                std.debug.print("{s}EOF\n", .{G.line_clear});
+                G.running.store(false, .release);
+                G.ui.cond.signal(G.io);
             }
             break;
         };
         const len = try std.fmt.parseInt(usize, slen, 10);
 
         const line = r.readAlloc(aa, len) catch |err| {
-            std.debug.print("{s}Error when receiving: {any}\n", .{ line_clear, err });
-            running.store(false, .release);
-            ui.cond.signal(io);
+            std.debug.print("{s}Error when receiving: {any}\n", .{ G.line_clear, err });
+            G.running.store(false, .release);
+            G.ui.cond.signal(G.io);
             break;
         };
         defer aa.free(line);
 
-        ui.mutex.lock(io) catch |err| {
+        G.ui.mutex.lock(G.io) catch |err| {
             std.debug.print("Recv thread not able to take ui mutex. Err: {any}", .{err});
             return;
         };
         defer {
-            ui.pending = false;
-            ui.cond.signal(io);
-            ui.mutex.unlock(io);
+            G.ui.pending = false;
+            G.ui.cond.signal(G.io);
+            G.ui.mutex.unlock(G.io);
         }
         if (line.len == 0) {
-            if (ui.prompt_vis) {
-                try stdout.print("{s}{s}", .{ line_clear, prompt });
+            if (G.ui.prompt_vis) {
+                try stdout.print("{s}{s}", .{ G.line_clear, G.prompt });
             }
             continue;
         }
@@ -312,8 +313,8 @@ fn recvFn(r: *Io.Reader, stdout: *Io.Writer, state: *State) !void {
         switch (parsed_value.data) {
             .echo => |p| {
                 if (p.len == 0) {
-                    if (ui.prompt_vis) {
-                        try stdout.print("{s}{s}", .{ line_clear, prompt });
+                    if (G.ui.prompt_vis) {
+                        try stdout.print("{s}{s}", .{ G.line_clear, G.prompt });
                     }
                 } else try printMsg(p, stdout);
             },
@@ -348,8 +349,8 @@ fn recvFn(r: *Io.Reader, stdout: *Io.Writer, state: *State) !void {
 }
 
 inline fn printMsg(msg: []const u8, stdout: *Io.Writer) !void {
-    if (ui.prompt_vis) {
-        try stdout.print("{s}{s}\n{s}", .{ line_clear, msg, prompt });
+    if (G.ui.prompt_vis) {
+        try stdout.print("{s}{s}\n{s}", .{ G.line_clear, msg, G.prompt });
     } else {
         try stdout.print("{s}\n", .{msg});
     }

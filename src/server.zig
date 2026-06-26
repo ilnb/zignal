@@ -1,8 +1,10 @@
-var running = std.atomic.Value(bool).init(true);
+const G = struct {
+    var running = std.atomic.Value(bool).init(true);
+};
 
 pub fn handleSig(sig: posix.SIG) callconv(.c) void {
     _ = sig;
-    if (!running.swap(false, .acq_rel)) return;
+    if (!G.running.swap(false, .acq_rel)) return;
 }
 
 pub fn main(init: std.process.Init) !void {
@@ -108,7 +110,7 @@ pub fn main(init: std.process.Init) !void {
         .{ .fd = server.socket.handle, .events = posix.POLL.IN, .revents = 0 },
     };
     var id: usize = 0;
-    while (running.load(.acquire)) {
+    while (G.running.load(.acquire)) {
         fds[0].revents = 0;
         if (posix.poll(&fds, 100) catch break == 0) continue;
         if (fds[0].revents & posix.POLL.IN == 0) continue;
@@ -116,7 +118,7 @@ pub fn main(init: std.process.Init) !void {
         const conn = server.accept(io) catch |err| switch (err) {
             error.WouldBlock => continue,
             else => {
-                if (!running.load(.acquire)) break;
+                if (!G.running.load(.acquire)) break;
                 return err;
             },
         };
