@@ -54,12 +54,14 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
-    const server_install = b.addInstallArtifact(server, .{});
-    gstep.dependOn(&server_install.step);
-    const server_step = b.step("run-server", "Run the server");
+    const install_server = b.addInstallArtifact(server, .{});
+    gstep.dependOn(&install_server.step);
+    const build_server = b.step("server", "Builds the server binary");
+    build_server.dependOn(&install_server.step);
+    const run_server = b.step("run-server", "Run the server");
     const server_cmd = b.addRunArtifact(server);
-    server_step.dependOn(&server_cmd.step);
-    server_cmd.step.dependOn(&server_install.step);
+    run_server.dependOn(&server_cmd.step);
+    server_cmd.step.dependOn(&install_server.step);
     if (b.args) |args| server_cmd.addArgs(args);
 
     const client_mod = b.createModule(.{
@@ -87,11 +89,13 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
-    const client_install = b.addInstallArtifact(client, .{});
-    gstep.dependOn(&client_install.step);
-    const client_step = b.step("run-client", "Run the client");
+    const install_client = b.addInstallArtifact(client, .{});
+    gstep.dependOn(&install_client.step);
+    const build_client = b.step("client", "Builds the client binary");
+    build_client.dependOn(&install_client.step);
+    const run_client = b.step("run-client", "Run the client");
     const client_cmd = b.addRunArtifact(client);
-    client_step.dependOn(&client_cmd.step);
-    client_cmd.step.dependOn(&client_install.step);
+    run_client.dependOn(&client_cmd.step);
+    client_cmd.step.dependOn(&install_client.step);
     if (b.args) |args| client_cmd.addArgs(args);
 }
