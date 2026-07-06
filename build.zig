@@ -98,4 +98,44 @@ pub fn build(b: *std.Build) void {
     run_client.dependOn(&client_cmd.step);
     client_cmd.step.dependOn(&install_client.step);
     if (b.args) |args| client_cmd.addArgs(args);
+
+    const sdl3 = b.dependency("zsdl3", .{});
+    const sdl3_mod = sdl3.module("zsdl3");
+    const gui_mod = b.createModule(.{
+        .root_source_file = b.path("src/gui.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "types", .module = types },
+            .{ .name = "utils", .module = utils },
+            .{ .name = "zsdl3", .module = sdl3_mod },
+        },
+    });
+
+    const client_gui = b.addExecutable(.{
+        .name = "client-gui",
+        .use_lld = false,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/client_gui.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "client", .module = client_mod },
+                .{ .name = "avl", .module = avl },
+                .{ .name = "utils", .module = utils },
+                .{ .name = "types", .module = types },
+                .{ .name = "zsdl3", .module = sdl3_mod },
+                .{ .name = "gui", .module = gui_mod },
+            },
+        }),
+    });
+    const install_client_gui = b.addInstallArtifact(client_gui, .{});
+    gstep.dependOn(&install_client_gui.step);
+    const build_client_gui = b.step("client-gui", "Builds the gui client binary");
+    build_client_gui.dependOn(&install_client_gui.step);
+    const run_client_gui = b.step("run-client-gui", "Run the gui client");
+    const client_gui_cmd = b.addRunArtifact(client_gui);
+    run_client_gui.dependOn(&client_gui_cmd.step);
+    client_gui_cmd.step.dependOn(&install_client_gui.step);
+    if (b.args) |args| client_gui_cmd.addArgs(args);
 }

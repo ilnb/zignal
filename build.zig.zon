@@ -1,6 +1,12 @@
 .{
     .name = .server,
     .version = "0.0.0",
+    .dependencies = .{
+        .zsdl3 = .{
+            .url = "git+https://github.com/ilnb/zsdl3?ref=master#69d4856000982ff65314d5c09daefce38fd81916",
+            .hash = "zsdl3-0.0.0-l0pNpJA-BQA2DNnfBS3A1zAzarINgVeUIHy_4uR0Ubx_",
+        },
+    },
     .fingerprint = 0x5a6dd5f6998506b2,
     .minimum_zig_version = "0.16.0",
     .paths = .{
