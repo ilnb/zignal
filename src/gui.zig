@@ -92,6 +92,25 @@ pub const WashRatio = struct {
     d: ?u32 = null,
 };
 
+pub inline fn renderTextCentered(renderer: *sdl.Renderer, font: *sdl.TtfFont, text: [:0]const u8, color: sdl.Color, rect: sdl.FRect) void {
+    if (sdl.ttf.renderTextBlended(font, text, text.len, color)) |surf| {
+        defer sdl.surface.destroy(surf);
+        if (sdl.createTextureFromSurface(renderer, surf)) |tex| {
+            defer sdl.destroyTexture(tex);
+            var w: f32, var h: f32 = .{ 0, 0 };
+            if (sdl.getTextureSize(tex, &w, &h)) {
+                const dst = sdl.FRect{
+                    .x = rect.x + (rect.w - w) / 2,
+                    .y = rect.y + (rect.h - h) / 2,
+                    .w = w,
+                    .h = h,
+                };
+                _ = sdl.renderTexture(renderer, tex, null, &dst);
+            }
+        }
+    }
+}
+
 pub inline fn drawBRect(r: *sdl.Renderer, rect: *const sdl.FRect, pad: f32, border_color: sdl.Color, inner_color: sdl.Color) bool {
     const inner_rect: sdl.FRect = .{
         .x = rect.x + pad,

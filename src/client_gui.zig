@@ -306,7 +306,7 @@ pub fn main(init: std.process.Init) !void {
                                             try state.sendData(writer, .{
                                                 .msg = .{
                                                     .peer = try std.fmt.bufPrint(&rid_buf, "{d}", .{c.rid}),
-                                                    .buf = @constCast(trimmed),
+                                                    .buf = trimmed,
                                                 },
                                             }, pkt_id) orelse break;
 
@@ -316,12 +316,13 @@ pub fn main(init: std.process.Init) !void {
                                                 .id = pkt_id,
                                                 .state = .pending,
                                             });
-                                            try state.pset.put(.{ .id = pkt_id, .cid = ui.curr_user.?, .mid = c.msgs.items.len - 1 });
-
-                                            c.input.shrinkRetainingCapacity(0);
-                                        } else {
-                                            c.input.shrinkRetainingCapacity(0);
+                                            try state.pset.put(.{
+                                                .id = pkt_id,
+                                                .cidx = ui.curr_user.?,
+                                                .midx = c.msgs.items.len - 1,
+                                            });
                                         }
+                                        c.input.shrinkRetainingCapacity(0);
                                     } else {
                                         ui.mouse = .input;
                                         _ = sdl.startTextInput(g_window);
@@ -389,11 +390,13 @@ pub fn main(init: std.process.Init) !void {
                                                 .id = pkt_id,
                                                 .state = .pending,
                                             }) catch return;
-                                            state.pset.put(.{ .id = pkt_id, .cid = ui.curr_user.?, .mid = c.msgs.items.len - 1 }) catch return;
-                                            c.input.shrinkRetainingCapacity(0);
-                                        } else {
-                                            c.input.shrinkRetainingCapacity(0);
+                                            state.pset.put(.{
+                                                .id = pkt_id,
+                                                .cidx = ui.curr_user.?,
+                                                .midx = c.msgs.items.len - 1,
+                                            }) catch return;
                                         }
+                                        c.input.shrinkRetainingCapacity(0);
                                     }
                                     ui.chat_win.input_box.scroll = 0;
                                 },
@@ -476,18 +479,18 @@ pub fn main(init: std.process.Init) !void {
                             },
                             .err => |e| {
                                 if (parsed_value.id) |id| {
-                                    if (state.pset.find(.{ .id = id, .cid = 0, .mid = 0 })) |node| {
+                                    if (state.pset.find(.{ .id = id, .cidx = 0, .midx = 0 })) |node| {
                                         const mapping = node.key;
-                                        state.clients.items[mapping.cid].msgs.items[mapping.mid].state = .err;
+                                        state.clients.items[mapping.cidx].msgs.items[mapping.midx].state = .err;
                                         state.pset.remove(node.key);
                                     }
                                 }
                                 std.debug.print("Server error: {s}\n", .{e});
                             },
                             .ack => |id| {
-                                if (state.pset.find(.{ .id = id, .cid = 0, .mid = 0 })) |node| {
+                                if (state.pset.find(.{ .id = id, .cidx = 0, .midx = 0 })) |node| {
                                     const mapping = node.key;
-                                    state.clients.items[mapping.cid].msgs.items[mapping.mid].state = .sent;
+                                    state.clients.items[mapping.cidx].msgs.items[mapping.midx].state = .sent;
                                     state.pset.remove(node.key);
                                 }
                             },
@@ -629,7 +632,7 @@ pub fn main(init: std.process.Init) !void {
                 const border_color = gui.washColor(ui.bg, .{ .n = 12 });
                 _ = gui.drawBRect(g_renderer, &btn_rect, 2.0, border_color, inner_color);
 
-                renderTextCentered(g_renderer, ui.font, "Connect", ui.font_color, btn_rect);
+                gui.renderTextCentered(g_renderer, ui.font, "Connect", ui.font_color, btn_rect);
             } else {
                 const tb = chat_win.top_bar;
                 const tb_rect = sdl.FRect{
@@ -651,7 +654,7 @@ pub fn main(init: std.process.Init) !void {
                 const btn_inner = gui.washColor(ui.bg, .{ .n = 10 });
                 const btn_border = gui.washColor(ui.bg, .{ .n = 14 });
                 _ = gui.drawBRect(g_renderer, &btn_rect, 1.0, btn_border, btn_inner);
-                renderTextCentered(g_renderer, ui.font, "Disconnect", ui.font_color, btn_rect);
+                gui.renderTextCentered(g_renderer, ui.font, "Disconnect", ui.font_color, btn_rect);
 
                 const status_rect = sdl.FRect{
                     .x = @floatFromInt(chat_win.x + chat_win.pad * 3),
@@ -660,8 +663,11 @@ pub fn main(init: std.process.Init) !void {
                     .h = @floatFromInt(tb.btn_h),
                 };
                 const status_str: [:0]const u8 = if (c.online) "Online" else "Offline";
-                const status_color = if (c.online) sdl.Color{ .r = 0x50, .g = 0xc8, .b = 0x50, .a = 0xff } else sdl.Color{ .r = 0x88, .g = 0x88, .b = 0x88, .a = 0xff };
-                renderTextCentered(g_renderer, ui.font, status_str, status_color, status_rect);
+                const status_color = if (c.online)
+                    sdl.Color{ .r = 0x50, .g = 0xc8, .b = 0x50 }
+                else
+                    sdl.Color{ .r = 0x88, .g = 0x88, .b = 0x88 };
+                gui.renderTextCentered(g_renderer, ui.font, status_str, status_color, status_rect);
 
                 const input_box = sdl.FRect{
                     .x = @floatFromInt(chat_win.x),
@@ -671,13 +677,7 @@ pub fn main(init: std.process.Init) !void {
                 };
                 const inner_color = gui.washColor(ui.bg, .{ .n = 6 });
                 const border_color = gui.washColor(ui.bg, .{ .n = 11 });
-                _ = gui.drawBRect(
-                    g_renderer,
-                    &input_box,
-                    @floatFromInt(chat_win.pad),
-                    border_color,
-                    inner_color,
-                );
+                _ = gui.drawBRect(g_renderer, &input_box, @floatFromInt(chat_win.pad), border_color, inner_color);
 
                 const input_clip_rect = sdl.Rect{
                     .x = @intCast(chat_win.x),
@@ -691,7 +691,7 @@ pub fn main(init: std.process.Init) !void {
                     var in_txt = std.ArrayList(u8).empty;
                     defer in_txt.deinit(ga);
                     in_txt.appendSlice(ga, c.input.items) catch {};
-                    if (c.input.items.len > 0 and c.input.items[c.input.items.len - 1] == '\n') {
+                    if (utils.back(c.input.items) == '\n') {
                         in_txt.append(ga, ' ') catch {};
                     }
                     in_txt.append(ga, 0) catch {};
@@ -701,7 +701,13 @@ pub fn main(init: std.process.Init) !void {
 
                     if (c.input.items.len > 0) {
                         const wrap_len: c_int = @as(c_int, @intCast(chat_win.input_box.w)) - 20;
-                        if (sdl.ttf.renderTextBlendedWrapped(ui.font, in_txt.items[0 .. in_txt.items.len - 1 :0].ptr, in_txt.items.len - 1, ui.font_color, wrap_len)) |surf| {
+                        if (sdl.ttf.renderTextBlendedWrapped(
+                            ui.font,
+                            in_txt.items[0 .. in_txt.items.len - 1 :0].ptr,
+                            in_txt.items.len - 1,
+                            ui.font_color,
+                            wrap_len,
+                        )) |surf| {
                             defer sdl.surface.destroy(surf);
                             if (sdl.createTextureFromSurface(g_renderer, surf)) |tex| {
                                 defer sdl.destroyTexture(tex);
@@ -770,7 +776,7 @@ pub fn main(init: std.process.Init) !void {
                                 .w = 2.0,
                                 .h = cursor_h,
                             };
-                            _ = sdl.render.setDrawColor(g_renderer, sdl.Color{ .r = 255, .g = 255, .b = 255, .a = 255 });
+                            _ = sdl.render.setDrawColor(g_renderer, sdl.Color{ .r = 0xff, .g = 0xff, .b = 0xff });
                             _ = sdl.render.fillRect(g_renderer, &cursor_rect);
                         }
                     }
@@ -792,7 +798,12 @@ pub fn main(init: std.process.Init) !void {
                 const cy: f32 = @floatFromInt(chat_win.h + chat_win.input_box.h / 2);
                 _ = gui.drawCircle(g_renderer, @intFromFloat(cx), @intFromFloat(cy), chat_win.send_r);
 
-                const send_btn_color = sdl.FColor{ .r = 37.0 / 255.0, .g = 211.0 / 255.0, .b = 102.0 / 255.0, .a = 1.0 };
+                const send_btn_color = sdl.FColor{
+                    .r = 37.0 / 255.0,
+                    .g = 211.0 / 255.0,
+                    .b = 102.0 / 255.0,
+                    .a = 1.0,
+                };
                 // Offset cx slightly right for visual balance of the triangle
                 _ = gui.drawRightTriangle(g_renderer, cx + 2.0, cy, @as(f32, @floatFromInt(chat_win.send_r)) * 0.9, send_btn_color);
 
@@ -820,10 +831,16 @@ pub fn main(init: std.process.Init) !void {
                     msg_txt.appendSlice(ga, msg.buf) catch {};
                     msg_txt.append(ga, 0) catch {};
 
-                    const m_color = if (msg.state == .pending) sdl.Color{ .r = 100, .g = 100, .b = 100, .a = 255 } else ui.font_color;
+                    const m_color = if (msg.state == .pending) sdl.Color{ .r = 100, .g = 100, .b = 100 } else ui.font_color;
 
                     const wrap_len: c_int = @as(c_int, @intCast(chat_win.w)) - 80;
-                    if (sdl.ttf.renderTextBlendedWrapped(ui.font, msg_txt.items[0 .. msg_txt.items.len - 1 :0].ptr, msg_txt.items.len - 1, m_color, wrap_len)) |surf| {
+                    if (sdl.ttf.renderTextBlendedWrapped(
+                        ui.font,
+                        msg_txt.items[0 .. msg_txt.items.len - 1 :0].ptr,
+                        msg_txt.items.len - 1,
+                        m_color,
+                        wrap_len,
+                    )) |surf| {
                         defer sdl.surface.destroy(surf);
                         if (sdl.createTextureFromSurface(g_renderer, surf)) |tex| {
                             defer sdl.destroyTexture(tex);
@@ -834,7 +851,10 @@ pub fn main(init: std.process.Init) !void {
                                 if (msg_y + h < @as(f32, @floatFromInt(tb.h))) break; // out of view
 
                                 const dst = sdl.FRect{
-                                    .x = if (is_own) @as(f32, @floatFromInt(chat_win.x + chat_win.w - 20)) - w else @as(f32, @floatFromInt(chat_win.x + 20)),
+                                    .x = if (is_own)
+                                        @as(f32, @floatFromInt(chat_win.x + chat_win.w - 20)) - w
+                                    else
+                                        @as(f32, @floatFromInt(chat_win.x + 20)),
                                     .y = msg_y,
                                     .w = w,
                                     .h = h,
@@ -847,7 +867,7 @@ pub fn main(init: std.process.Init) !void {
                                     .w = dst.w + 10,
                                     .h = dst.h + 10,
                                 };
-                                const b_color = if (is_own) gui.washColor(ui.bg, .{ .n = 10 }) else gui.washColor(ui.bg, .{ .n = 8 });
+                                const b_color = gui.washColor(ui.bg, .{ .n = if (is_own) 10 else 8 });
                                 _ = sdl.render.setDrawColor(g_renderer, b_color);
                                 _ = sdl.render.fillRect(g_renderer, &bubble);
 
@@ -912,26 +932,6 @@ fn recvFn(r: *Io.Reader, state: *State, recv_ev: c_uint) !void {
         ev.user.data2 = @ptrFromInt(line.len);
 
         _ = sdl.pushEvent(&ev);
-    }
-    std.debug.print("closing recv thread\n", .{});
-}
-
-fn renderTextCentered(renderer: *sdl.Renderer, font: *sdl.TtfFont, text: [:0]const u8, color: sdl.Color, rect: sdl.FRect) void {
-    if (sdl.ttf.renderTextBlended(font, text, text.len, color)) |surf| {
-        defer sdl.surface.destroy(surf);
-        if (sdl.createTextureFromSurface(renderer, surf)) |tex| {
-            defer sdl.destroyTexture(tex);
-            var w: f32, var h: f32 = .{ 0, 0 };
-            if (sdl.getTextureSize(tex, &w, &h)) {
-                const dst = sdl.FRect{
-                    .x = rect.x + (rect.w - w) / 2,
-                    .y = rect.y + (rect.h - h) / 2,
-                    .w = w,
-                    .h = h,
-                };
-                _ = sdl.renderTexture(renderer, tex, null, &dst);
-            }
-        }
     }
 }
 

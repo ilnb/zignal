@@ -446,7 +446,12 @@ pub fn handshakeWithClient(conn: net.Stream, state: *State) !HandshakeResult {
         if (std.mem.eql(u8, new_or_old, "OLD")) return error.UnknownClient;
         try writer.writeAll("2 OK");
         try writer.flush();
-        return .{ .new = Token{ .id = try state.ga.dupe(u8, token_id), .name = try state.ga.dupe(u8, "NA") } };
+        return .{
+            .new = Token{
+                .id = try state.ga.dupe(u8, token_id),
+                .name = try state.ga.dupe(u8, "NA"),
+            },
+        };
     }
 }
 
