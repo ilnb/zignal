@@ -114,7 +114,6 @@ pub fn main(init: std.process.Init) !void {
         .user_box = .{
             .w = 250,
             .h = 45,
-            .top_gap = 10,
         },
         .chat_win = .{
             .bg = .{ .r = 0x15, .g = 0x15, .b = 0x15 },
@@ -191,6 +190,7 @@ pub fn main(init: std.process.Init) !void {
     // var frame_count: u32 = 0;
     // const start_time = sdl.getTicks();
 
+    var ignore_text_input = false;
     while (G.running.load(.acquire)) {
         var ev: sdl.Event = undefined;
         while (sdl.pollEvent(&ev)) {
@@ -317,6 +317,36 @@ pub fn main(init: std.process.Init) !void {
                                         _ = txt.pop();
                                     }
                                     if (txt.items.len > 0) _ = txt.pop();
+                                },
+                                sdl.SCANCODE_RETURN => {
+                                    if ((sdl.getModState() & sdl.keycode.KMOD_SHIFT) != 0) {
+                                        c.input.append(ga, '\n') catch {};
+                                    } else {
+                                        const ibuf = c.input.items;
+                                        const trimmed = std.mem.trim(u8, ibuf, " \n\r\t");
+                                        if (trimmed.len > 0) {
+                                            var rid_buf: [32]u8 = undefined;
+                                            const pkt_id = state.packet_id_counter;
+                                            state.packet_id_counter += 1;
+                                            state.sendData(writer, .{
+                                                .msg = .{
+                                                    .peer = std.fmt.bufPrint(&rid_buf, "{d}", .{c.rid}) catch return,
+                                                    .buf = trimmed,
+                                                },
+                                            }, pkt_id) catch return orelse break;
+                                            c.msgs.append(ga, .{
+                                                .rid = state.rid,
+                                                .buf = ga.dupe(u8, trimmed) catch return,
+                                                .id = pkt_id,
+                                                .state = .pending,
+                                            }) catch return;
+                                            state.pset.put(.{ .id = pkt_id, .cid = ui.curr_user.?, .mid = c.msgs.items.len - 1 }) catch return;
+                                            c.input.shrinkRetainingCapacity(0);
+                                        } else {
+                                            c.input.shrinkRetainingCapacity(0);
+                                        }
+                                    }
+                                    ui.chat_win.input_box.scroll = 0;
                                 },
                                 else => {},
                             }

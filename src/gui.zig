@@ -2,24 +2,30 @@ pub const UI = struct {
     pub const UserBox = struct {
         w: usize,
         h: usize,
-        top_gap: usize,
         pad: usize = 2,
-        scroll: i32 = 0,
+        scroll: f32 = 0,
         font_size: f32 = 15.0,
     };
     pub const ChatWin = struct {
         pub const InputBox = struct {
             w: usize = undefined,
             h: usize = 60,
+            scroll: f32 = 0,
+        };
+        pub const TopBar = struct {
+            h: usize = 40,
+            btn_w: usize = 120,
+            btn_h: usize = 24,
         };
 
         w: usize = undefined,
         h: usize = undefined,
         x: usize = undefined,
         input_box: InputBox = .{},
+        top_bar: TopBar = .{},
         pad: usize = 3,
-        scroll: i32 = 0,
-        send_r: usize = 30,
+        scroll: f32 = 0,
+        send_r: usize = 20,
         font_size: f32 = 10.0,
         bg: sdl.Color = undefined,
         font_color: sdl.Color = undefined,
