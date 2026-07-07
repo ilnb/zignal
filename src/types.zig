@@ -17,6 +17,7 @@ pub const PacketType = enum {
     users,
     to_get,
     err,
+    ack,
 };
 
 pub const Data = union(PacketType) {
@@ -45,15 +46,17 @@ pub const Data = union(PacketType) {
     },
     msg: struct {
         peer: ?[]u8 = null,
-        buf: []u8,
+        buf: []const u8,
     },
     users: []Infos,
     to_get: [][]u8,
     err: []const u8,
+    ack: usize,
 };
 
 pub const Packet = struct {
     rid: usize,
+    id: ?usize = null,
     data: Data,
 };
 
@@ -90,14 +93,15 @@ pub const Server = struct {
             return errFlush_(self, w);
         }
 
-        pub inline fn sendData(self: *const Client, w: *Writer, data: Data) !?void {
-            return sendData_(self, w, data);
+        pub inline fn sendData(self: *const Client, w: *Writer, data: Data, id: ?usize) !?void {
+            return sendData_(self, w, data, id);
         }
 
-        pub inline fn wSendData(ga: Allocator, w: *Writer, data: Data) !?void {
+        pub inline fn wSendData(ga: Allocator, w: *Writer, data: Data, id: ?usize) !?void {
             const rid = std.math.maxInt(usize);
             const msg = try std.json.Stringify.valueAlloc(ga, Packet{
                 .rid = rid,
+                .id = id,
                 .data = data,
             }, .{ .whitespace = .indent_2 });
             defer ga.free(msg);
@@ -143,8 +147,11 @@ pub const Server = struct {
 };
 
 pub const CClient = struct {
+    pub const PendingMsg = struct { id: usize, buf: []const u8 };
     rid: usize = undefined,
     name: []u8 = undefined,
+    cset: Set(PendingMsg) = undefined,
+    packet_id_counter: usize = 0,
     aa: Allocator,
     io: Io,
 };
@@ -160,12 +167,16 @@ pub const GClient = struct {
         online: bool,
     };
     pub const Info = struct { rid: usize, name: []u8, online: bool };
-    pub const Msg = struct { rid: usize, buf: []u8 };
+    pub const MsgState = enum { pending, sent, err };
+    pub const Msg = struct { rid: usize, buf: []u8, id: usize, state: MsgState = .sent };
+    pub const PktMsgMap = struct { id: usize, cid: usize, mid: usize };
 
     rid: usize = undefined,
     name: ?[]u8 = null,
+    packet_id_counter: usize = 1,
     clients: AL(Client) = .empty,
     cset: Set(usize),
+    pset: Set(PktMsgMap) = undefined,
     aa: Allocator,
     ga: Allocator,
     io: Io,
@@ -174,6 +185,7 @@ pub const GClient = struct {
         const aa = self.ga;
         if (self.name) |name| aa.free(name);
         self.cset.deinit();
+        self.pset.deinit();
         for (self.clients.items) |*c| {
             aa.free(c.name);
             for (c.msgs.items) |*msg| aa.free(msg.buf);
@@ -195,8 +207,8 @@ pub const GClient = struct {
         return errFlush_(self, w);
     }
 
-    pub inline fn sendData(self: *const Self, w: *Writer, data: Data) !?void {
-        return sendData_(self, w, data);
+    pub inline fn sendData(self: *const Self, w: *Writer, data: Data, id: ?usize) !?void {
+        return sendData_(self, w, data, id);
     }
 };
 
@@ -236,7 +248,7 @@ fn errFlush_(self: anytype, w: *Writer) ?void {
     };
 }
 
-fn sendData_(self: anytype, w: *Writer, data: Data) !?void {
+fn sendData_(self: anytype, w: *Writer, data: Data, id: ?usize) !?void {
     comptime var T = @TypeOf(self);
     const iT = @typeInfo(T);
     if (iT == .pointer) T = iT.pointer.child;
@@ -252,6 +264,7 @@ fn sendData_(self: anytype, w: *Writer, data: Data) !?void {
 
     const msg = try std.json.Stringify.valueAlloc(aa, Packet{
         .rid = self.rid,
+        .id = id,
         .data = data,
     }, .{ .whitespace = .indent_2 });
     defer aa.free(msg);

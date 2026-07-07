@@ -122,6 +122,12 @@ pub fn main(init: std.process.Init) !void {
     var state: State = .{
         .aa = aa,
         .io = G.io,
+        .packet_id_counter = 1,
+        .cset = types.Set(State.PendingMsg).init(aa, struct {
+            fn cmp(a: State.PendingMsg, b: State.PendingMsg) std.math.Order {
+                return std.math.order(a.id, b.id);
+            }
+        }.cmp),
     };
 
     const recv_thread = std.Thread.spawn(.{}, recvFn, .{ reader, stdout, &state }) catch |err| {
@@ -186,7 +192,13 @@ pub fn main(init: std.process.Init) !void {
                     G.ui.pending = true;
                     G.ui.mutex.unlock(G.io);
 
-                    const to_send = try Stringify.valueAlloc(state.aa, packet, .{ .whitespace = .indent_2 });
+                    var pkt = packet;
+                    pkt.id = state.packet_id_counter;
+                    state.packet_id_counter += 1;
+                    
+                    try state.cset.put(.{ .id = pkt.id.?, .buf = try aa.dupe(u8, msg) });
+
+                    const to_send = try Stringify.valueAlloc(state.aa, pkt, .{ .whitespace = .indent_2 });
                     defer state.aa.free(to_send);
 
                     try writer.print("{d} {s}", .{ to_send.len, to_send });
@@ -340,7 +352,26 @@ fn recvFn(r: *Io.Reader, stdout: *Io.Writer, state: *State) !void {
                 try printMsg(msg, stdout);
             },
             .err => |e| {
-                try printMsg(e, stdout);
+                if (parsed_value.id) |id| {
+                    if (state.cset.find(.{ .id = id, .buf = "" })) |node| {
+                        const orig = node.key.buf;
+                        const emsg = try std.fmt.allocPrint(aa, "Error sending '{s}': {s}", .{ orig, e });
+                        defer aa.free(emsg);
+                        try printMsg(emsg, stdout);
+                        aa.free(orig);
+                        state.cset.remove(node.key);
+                    } else {
+                        try printMsg(e, stdout);
+                    }
+                } else {
+                    try printMsg(e, stdout);
+                }
+            },
+            .ack => |id| {
+                if (state.cset.find(.{ .id = id, .buf = "" })) |node| {
+                    aa.free(node.key.buf);
+                    state.cset.remove(node.key);
+                }
             },
             .new_user, .update_user => {},
             else => unreachable,

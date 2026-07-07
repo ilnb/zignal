@@ -66,7 +66,7 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
                 info("Corrupted tokens list. Client with {d} not found.", .{client.rid});
                 try client.sendData(w, Data{
                     .err = "ERR: Corrupted tokens list on server. Client not found.",
-                }) orelse return;
+                }, parsed_value.id) orelse return;
                 return;
             };
             if (eql(u8, token.name, name)) return;
@@ -77,7 +77,7 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
                 defer aa.free(e);
                 try client.writer_mutex.lock(io);
                 defer client.writer_mutex.unlock(io);
-                try client.sendData(w, Data{ .err = e }) orelse return;
+                try client.sendData(w, Data{ .err = e }, parsed_value.id) orelse return;
                 return;
             };
             client.name = token.name;
@@ -93,7 +93,7 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
                         .rid = client.rid,
                         .name = client.name,
                     },
-                }) orelse continue;
+                }, null) orelse continue;
             }
         },
         .link => |p| {
@@ -104,7 +104,7 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
                 defer aa.free(e);
                 try client.writer_mutex.lock(io);
                 defer client.writer_mutex.unlock(io);
-                try client.sendData(w, Data{ .err = e }) orelse return;
+                try client.sendData(w, Data{ .err = e }, parsed_value.id) orelse return;
                 return;
             };
             const c2 = state.clients.items[i];
@@ -115,8 +115,12 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
                 if (try unlinkClients(client, c2, state)) ret = 2;
             }
             try client.writer_mutex.lock(io);
-            client.errWriteAll(w, "") orelse return;
-            client.errFlush(w) orelse return;
+            if (parsed_value.id) |id| {
+                try client.sendData(w, Data{ .ack = id }, id) orelse return;
+            } else {
+                client.errWriteAll(w, "") orelse return;
+                client.errFlush(w) orelse return;
+            }
             client.writer_mutex.unlock(io);
             if (ret != 0) {
                 const add = ret == 1;
@@ -134,14 +138,14 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
                             .rid = client.rid,
                             .links = &.{.{ .add = add, .rid = c2.rid }},
                         },
-                    }) orelse continue;
+                    }, null) orelse continue;
 
                     try c.sendData(cw, .{
                         .update_user = .{
                             .rid = c2.rid,
                             .links = &.{.{ .add = add, .rid = client.rid }},
                         },
-                    }) orelse continue;
+                    }, null) orelse continue;
                 }
             }
         },
@@ -154,7 +158,7 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
                     defer aa.free(e);
                     try client.writer_mutex.lock(io);
                     defer client.writer_mutex.unlock(io);
-                    try client.sendData(w, Data{ .err = e }) orelse return;
+                    try client.sendData(w, Data{ .err = e }, parsed_value.id) orelse return;
                     return;
                 };
                 const c = state.clients.items[i];
@@ -163,14 +167,14 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
                     defer aa.free(e);
                     try client.writer_mutex.lock(io);
                     defer client.writer_mutex.unlock(io);
-                    try client.sendData(w, Data{ .err = e }) orelse return;
+                    try client.sendData(w, Data{ .err = e }, parsed_value.id) orelse return;
                     return;
                 } else if (!c.online) {
                     const e = try allocPrint(aa, "ERR: Client {d} is offline.", .{c.rid});
                     defer aa.free(e);
                     try client.writer_mutex.lock(io);
                     defer client.writer_mutex.unlock(io);
-                    try client.sendData(w, Data{ .err = e }) orelse return;
+                    try client.sendData(w, Data{ .err = e }, parsed_value.id) orelse return;
                     return;
                 }
                 var cw_file = c.conn.writer(io, &buf);
@@ -184,7 +188,7 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
                         .peer = peer,
                         .buf = p.buf,
                     },
-                }) orelse return;
+                }, null) orelse return;
             } else {
                 try client.active_mutex.lock(io);
                 defer client.active_mutex.unlock(io);
@@ -202,14 +206,18 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
                                 .peer = peer,
                                 .buf = p.buf,
                             },
-                        }) orelse continue;
+                        }, null) orelse continue;
                     }
                 }
             }
             try client.writer_mutex.lock(io);
             defer client.writer_mutex.unlock(io);
-            client.errWriteAll(w, "") orelse return;
-            client.errFlush(w) orelse return;
+            if (parsed_value.id) |id| {
+                try client.sendData(w, Data{ .ack = id }, id) orelse return;
+            } else {
+                client.errWriteAll(w, "") orelse return;
+                client.errFlush(w) orelse return;
+            }
         },
         .to_get => |p| {
             try state.mutex.lock(io);
@@ -222,7 +230,7 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
                         defer aa.free(e);
                         try client.writer_mutex.lock(io);
                         defer client.writer_mutex.unlock(io);
-                        try client.sendData(w, Data{ .err = e }) orelse continue;
+                        try client.sendData(w, Data{ .err = e }, parsed_value.id) orelse continue;
                         continue;
                     };
                     try arr.append(aa, try getInfo(state.clients.items[i], state));
@@ -242,12 +250,12 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
             defer client.writer_mutex.unlock(io);
             try client.sendData(w, Data{
                 .users = users,
-            }) orelse return;
+            }, parsed_value.id) orelse return;
         },
         .err => |p| {
             try client.writer_mutex.lock(io);
             defer client.writer_mutex.unlock(io);
-            try client.sendData(w, Data{ .err = p }) orelse return;
+            try client.sendData(w, Data{ .err = p }, parsed_value.id) orelse return;
         },
         else => {},
     }
@@ -386,7 +394,7 @@ fn cleanupClient(client: *Client, state: *State) !void {
                 .rid = client.rid,
                 .online = client.online,
             },
-        }) catch break orelse continue;
+        }, null) catch break orelse continue;
     }
 
     // const links = &state.links;

@@ -134,7 +134,7 @@ pub fn main(init: std.process.Init) !void {
             const w = &c_writer.interface;
             try Client.wSendData(state.aa, w, .{
                 .err = res,
-            }) orelse continue;
+            }, null) orelse continue;
             continue;
         };
 
@@ -211,7 +211,7 @@ pub fn main(init: std.process.Init) !void {
                         .name = client.name,
                         .online = true,
                     },
-                }) orelse continue;
+                }, null) orelse continue;
             }
 
             try client.sendData(w, .{
@@ -220,7 +220,7 @@ pub fn main(init: std.process.Init) !void {
                     .name = c.name,
                     .online = c.online,
                 },
-            }) orelse continue;
+            }, null) orelse continue;
 
             if (state.links.getPtr(c.rid).?.find(client.rid) != null) {
                 try present_links.append(aa, .{ .rid = c.rid });
@@ -231,7 +231,7 @@ pub fn main(init: std.process.Init) !void {
                 .rid = client.rid,
                 .links = present_links.items[0..present_links.items.len],
             },
-        }) orelse continue;
+        }, null) orelse continue;
 
         _ = try std.Thread.spawn(.{}, server_mod.handleClient, .{ client, &state });
     }

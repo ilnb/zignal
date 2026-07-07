@@ -165,6 +165,11 @@ pub fn main(init: std.process.Init) !void {
         .ga = ga,
         .io = init.io,
         .cset = .init(ga, utils.usizeCmp),
+        .pset = types.Set(State.PktMsgMap).init(ga, struct {
+            fn cmp(a: State.PktMsgMap, b: State.PktMsgMap) std.math.Order {
+                return std.math.order(a.id, b.id);
+            }
+        }.cmp),
     };
     defer state.deinit();
 
@@ -362,7 +367,26 @@ pub fn main(init: std.process.Init) !void {
                                 try c.msgs.append(ga, .{
                                     .rid = rid,
                                     .buf = try ga.dupe(u8, m.buf),
+                                    .id = 0,
+                                    .state = .sent,
                                 });
+                            },
+                            .err => |e| {
+                                if (parsed_value.id) |id| {
+                                    if (state.pset.find(.{ .id = id, .cid = 0, .mid = 0 })) |node| {
+                                        const mapping = node.key;
+                                        state.clients.items[mapping.cid].msgs.items[mapping.mid].state = .err;
+                                        state.pset.remove(node.key);
+                                    }
+                                }
+                                std.debug.print("Server error: {s}\n", .{e});
+                            },
+                            .ack => |id| {
+                                if (state.pset.find(.{ .id = id, .cid = 0, .mid = 0 })) |node| {
+                                    const mapping = node.key;
+                                    state.clients.items[mapping.cid].msgs.items[mapping.mid].state = .sent;
+                                    state.pset.remove(node.key);
+                                }
                             },
                             .update_user => |u| {
                                 if (u.rid == state.rid) {
@@ -382,6 +406,19 @@ pub fn main(init: std.process.Init) !void {
                                                 continue;
                                             };
                                             c.connected = l.add;
+                                            if (ui.curr_user) |idx| {
+                                                if (state.clients.items[idx].rid == c.rid) {
+                                                    if (l.add) {
+                                                        ui.mouse = .input;
+                                                        _ = sdl.startTextInput(g_window);
+                                                        ui.text_cursor.visible = true;
+                                                        ui.text_cursor.last_toggle = sdl.getTicks();
+                                                    } else {
+                                                        ui.mouse = .to_link;
+                                                        _ = sdl.stopTextInput(g_window);
+                                                    }
+                                                }
+                                            }
                                             std.debug.print("{s} {d}\n", .{ if (l.add) "Connected to" else "Disconnected from", c.rid });
                                         }
                                     }
