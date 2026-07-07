@@ -78,6 +78,15 @@ pub inline fn drawCircle(r: *sdl.Renderer, cx: i32, cy: i32, radius: usize) bool
     return ret;
 }
 
+pub inline fn drawRightTriangle(r: *sdl.Renderer, cx: f32, cy: f32, size: f32, color: sdl.FColor) bool {
+    const vertices = [_]sdl.Vertex{
+        .{ .position = .{ .x = cx - size / 2.0, .y = cy - size / 2.0 }, .color = color, .tex_coord = .{ .x = 0, .y = 0 } },
+        .{ .position = .{ .x = cx - size / 2.0, .y = cy + size / 2.0 }, .color = color, .tex_coord = .{ .x = 0, .y = 0 } },
+        .{ .position = .{ .x = cx + size / 2.0, .y = cy }, .color = color, .tex_coord = .{ .x = 0, .y = 0 } },
+    };
+    return sdl.renderGeometry(r, null, &vertices, 3, null, 0);
+}
+
 pub const WashRatio = struct {
     n: u32 = 5,
     d: ?u32 = null,
