@@ -206,6 +206,22 @@ pub fn main(init: std.process.Init) !void {
                         .y = ev.motion.y,
                     };
                 },
+                sdl.EVENT_MOUSE_WHEEL => {
+                    const my = ev.wheel.y;
+                    const scroll_speed: f32 = 30.0;
+                    switch (ui.mouse) {
+                        .on_list => {
+                            ui.user_box.scroll = @max(0, ui.user_box.scroll + my * scroll_speed);
+                        },
+                        .on_chat => {
+                            ui.chat_win.scroll = @max(0, ui.chat_win.scroll + my * scroll_speed);
+                        },
+                        .input => {
+                            ui.chat_win.input_box.scroll = @max(0, ui.chat_win.input_box.scroll + my * scroll_speed);
+                        },
+                        else => {},
+                    }
+                },
 
                 sdl.EVENT_MOUSE_BUTTON_DOWN => {
                     const mx: usize = @floor(@max(0.0, ui.cursor.x));
@@ -311,17 +327,25 @@ pub fn main(init: std.process.Init) !void {
                 sdl.EVENT_KEY_UP => keys_held[@intCast(ev.key.scancode)] = false,
 
                 sdl.EVENT_TEXT_INPUT => {
+                    if (ignore_text_input) {
+                        ignore_text_input = false;
+                        continue;
+                    }
                     lbl: switch (ui.mouse) {
                         .on_list => {},
                         .to_link => {},
                         .on_chat => {
                             ui.mouse = .input;
+                            _ = sdl.startTextInput(g_window);
                             continue :lbl .input;
                         },
                         .input => {
                             const text = std.mem.sliceTo(ev.text.text, 0);
                             const c = &state.clients.items[ui.curr_user.?];
-                            try c.input.appendSlice(ga, text);
+                            for (text) |ch| {
+                                if (ch >= 32) try c.input.append(state.ga, ch);
+                            }
+                            ui.chat_win.input_box.scroll = std.math.floatMax(f32);
                         },
                     }
                 },
@@ -454,7 +478,7 @@ pub fn main(init: std.process.Init) !void {
         for (state.clients.items, 0..) |*c, i| {
             const crect = sdl.Rect{
                 .x = 0,
-                .y = @intCast(i * ui.user_box.h + ui.user_box.top_gap - ui.user_box.pad * @intFromBool(i != 0)),
+                .y = @as(c_int, @intCast(i * ui.user_box.h)) - @as(c_int, @intFromFloat(ui.user_box.scroll)) - @as(c_int, @intCast(ui.user_box.pad * @intFromBool(i != 0))),
                 .h = @intCast(ui.user_box.h),
                 .w = @intCast(ui.user_box.w),
             };
@@ -813,6 +837,25 @@ fn recvFn(r: *Io.Reader, state: *State, recv_ev: c_uint) !void {
         _ = sdl.pushEvent(&ev);
     }
     std.debug.print("closing recv thread\n", .{});
+}
+
+fn renderTextCentered(renderer: *sdl.Renderer, font: *sdl.TtfFont, text: [:0]const u8, color: sdl.Color, rect: sdl.FRect) void {
+    if (sdl.ttf.renderTextBlended(font, text, text.len, color)) |surf| {
+        defer sdl.surface.destroy(surf);
+        if (sdl.createTextureFromSurface(renderer, surf)) |tex| {
+            defer sdl.destroyTexture(tex);
+            var w: f32, var h: f32 = .{ 0, 0 };
+            if (sdl.getTextureSize(tex, &w, &h)) {
+                const dst = sdl.FRect{
+                    .x = rect.x + (rect.w - w) / 2,
+                    .y = rect.y + (rect.h - h) / 2,
+                    .w = w,
+                    .h = h,
+                };
+                _ = sdl.renderTexture(renderer, tex, null, &dst);
+            }
+        }
+    }
 }
 
 const std = @import("std");

@@ -43,6 +43,10 @@ pub const UI = struct {
     chat_win: ChatWin = .{},
     mouse: MouseState = .on_list,
     cursor: Cursor = .{},
+    text_cursor: struct {
+        visible: bool = true,
+        last_toggle: u64 = 0,
+    } = .{},
     font: *sdl.TtfFont = undefined,
     bg: sdl.Color = undefined,
     font_color: sdl.Color = undefined,
