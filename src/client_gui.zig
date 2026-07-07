@@ -234,16 +234,25 @@ pub fn main(init: std.process.Init) !void {
                             ui.mouse = .on_list;
                             continue;
                         }
-                        const idx: usize = @as(usize, @intCast(@as(i32, @intCast(my)) + ui.user_box.scroll)) / ui.user_box.h;
+                        const scroll_int: usize = @intFromFloat(ui.user_box.scroll);
+                        const my_scrolled = my + scroll_int;
+                        const idx: usize = my_scrolled / ui.user_box.h;
                         if (idx >= len) {
                             ui.curr_user = null;
                             ui.mouse = .on_list;
                             continue;
                         }
-                        const vdiff: usize = my - idx * ui.user_box.h;
+                        const vdiff: usize = my_scrolled - idx * ui.user_box.h;
                         if (upad <= vdiff and vdiff <= ui.user_box.h - upad) {
                             ui.curr_user = idx;
-                            ui.mouse = if (state.clients.items[idx].connected) .input else .to_link;
+                            if (state.clients.items[idx].connected) {
+                                ui.mouse = .input;
+                                _ = sdl.startTextInput(g_window);
+                                ui.text_cursor.visible = true;
+                                ui.text_cursor.last_toggle = sdl.getTicks();
+                            } else {
+                                ui.mouse = .to_link;
+                            }
                         } else {
                             ui.curr_user = null;
                             ui.mouse = .on_list;
@@ -255,44 +264,83 @@ pub fn main(init: std.process.Init) !void {
                         const send_r = ui.chat_win.send_r;
                         const input_w = ui.chat_win.input_box.w;
 
-                        if (ui.mouse == .to_link) {
-                            // TODO: check for link button
-                        } else if (mwin_y >= chat_h + wpad and mwin_y <= ui.h - wpad) {
-                            if ((mwin_x < wpad or
-                                (mwin_x >= input_w - wpad and mwin_x < input_w) or
-                                mwin_x >= chat_w - send_r) and
-                                ui.curr_user != null)
-                            {
-                                ui.mouse = .on_chat;
-                            } else if (mwin_x >= input_w and mwin_x < chat_w - send_r) {
-                                const c = &state.clients.items[ui.curr_user.?];
-
-                                const ibuf = c.input.items;
-                                const ilen = ibuf.len;
-                                if (ilen == 0) continue;
-
-                                var rid_buf: [32]u8 = undefined;
-                                try state.sendData(writer, .{
-                                    .msg = .{
-                                        .peer = try std.fmt.bufPrint(&rid_buf, "{d}", .{c.rid}),
-                                        .buf = ibuf[0..ilen],
-                                    },
-                                }) orelse break;
-
-                                c.input.shrinkRetainingCapacity(0);
+                        if (ui.curr_user) |c_idx| {
+                            const c = &state.clients.items[c_idx];
+                            if (!c.connected) {
+                                const btn_w = 200;
+                                const btn_h = 50;
+                                const bx = (ui.chat_win.w - btn_w) / 2;
+                                const by = (ui.chat_win.h - btn_h) / 2;
+                                if (mwin_x >= bx and mwin_x <= bx + btn_w and mwin_y >= by and mwin_y <= by + btn_h) {
+                                    const pkt_id = state.packet_id_counter;
+                                    state.packet_id_counter += 1;
+                                    try state.sendData(writer, .{
+                                        .link = .{ .with = c.name, .invert = false },
+                                    }, pkt_id) orelse break;
+                                }
                             } else {
-                                ui.mouse = .input;
-                                _ = sdl.startTextInput(g_window);
+                                const tb = ui.chat_win.top_bar;
+                                if (mwin_y < tb.h) {
+                                    if (mwin_x >= ui.chat_win.w - tb.btn_w - ui.chat_win.pad and mwin_y >= (tb.h - tb.btn_h) / 2 and mwin_y <= (tb.h + tb.btn_h) / 2) {
+                                        const pkt_id = state.packet_id_counter;
+                                        state.packet_id_counter += 1;
+                                        try state.sendData(writer, .{
+                                            .link = .{ .with = c.name, .invert = true },
+                                        }, pkt_id) orelse break;
+                                    }
+                                } else if (mwin_y >= chat_h + wpad and mwin_y <= ui.h - wpad) {
+                                    if ((mwin_x < wpad or
+                                        (mwin_x >= input_w - wpad and mwin_x < input_w) or
+                                        mwin_x >= chat_w - send_r))
+                                    {
+                                        ui.mouse = .on_chat;
+                                    } else if (mwin_x >= input_w and mwin_x < chat_w - send_r) {
+                                        const ibuf = c.input.items;
+                                        const trimmed = std.mem.trim(u8, ibuf, " \n\r\t");
+                                        if (trimmed.len > 0) {
+                                            var rid_buf: [32]u8 = undefined;
+
+                                            const pkt_id = state.packet_id_counter;
+                                            state.packet_id_counter += 1;
+
+                                            try state.sendData(writer, .{
+                                                .msg = .{
+                                                    .peer = try std.fmt.bufPrint(&rid_buf, "{d}", .{c.rid}),
+                                                    .buf = @constCast(trimmed),
+                                                },
+                                            }, pkt_id) orelse break;
+
+                                            try c.msgs.append(ga, .{
+                                                .rid = state.rid,
+                                                .buf = try ga.dupe(u8, trimmed),
+                                                .id = pkt_id,
+                                                .state = .pending,
+                                            });
+                                            try state.pset.put(.{ .id = pkt_id, .cid = ui.curr_user.?, .mid = c.msgs.items.len - 1 });
+
+                                            c.input.shrinkRetainingCapacity(0);
+                                        } else {
+                                            c.input.shrinkRetainingCapacity(0);
+                                        }
+                                    } else {
+                                        ui.mouse = .input;
+                                        _ = sdl.startTextInput(g_window);
+                                    }
+                                } else {
+                                    ui.mouse = .on_chat;
+                                }
                             }
-                        } else {
-                            ui.mouse = .on_chat;
                         }
                     }
                 },
 
                 sdl.EVENT_KEY_DOWN => {
                     const sc = ev.key.scancode;
-                    if (keys_held[@intCast(sc)]) continue;
+                    if (keys_held[@intCast(sc)]) {
+                        ignore_text_input = true;
+                        continue;
+                    }
+                    ignore_text_input = false;
                     keys_held[@intCast(sc)] = true;
 
                     lbl: switch (ui.mouse) {
@@ -300,6 +348,7 @@ pub fn main(init: std.process.Init) !void {
                         .to_link => {},
                         .on_chat => {
                             ui.mouse = .input;
+                            _ = sdl.startTextInput(g_window);
                             continue :lbl .input;
                         },
                         .input => {
@@ -831,14 +880,12 @@ pub fn main(init: std.process.Init) !void {
 
     // const end_time = sdl.getTicks();
     // const fps = @as(f32, @floatFromInt(frame_count)) / (@as(f32, @floatFromInt(end_time - start_time)) / 1000.0);
-    // std.debug.print("Game loop ended. Average FPS: {d:.2}\n", .{fps});
+    // std.debug.print("Average FPS: {d:.2}\n", .{fps});
 }
 
 fn recvFn(r: *Io.Reader, state: *State, recv_ev: c_uint) !void {
     const aa = state.ga;
-    std.debug.print("recv thread started\n", .{});
     while (G.running.load(.acquire)) {
-        std.debug.print("receiving a packet\n", .{});
         const slen = r.takeDelimiter(' ') catch |err| {
             std.debug.print("Error when receiving: {any}\n", .{err});
             G.running.store(false, .release);
@@ -851,13 +898,13 @@ fn recvFn(r: *Io.Reader, state: *State, recv_ev: c_uint) !void {
             break;
         };
         const len = try std.fmt.parseInt(usize, slen, 10);
+        if (len == 0) continue;
 
         const line = r.readAlloc(aa, len) catch |err| {
             std.debug.print("Error when receiving: {any}\n", .{err});
             G.running.store(false, .release);
             break;
         };
-        std.debug.print("got packet\n", .{});
 
         var ev: sdl.Event = undefined;
         ev.type = recv_ev;
