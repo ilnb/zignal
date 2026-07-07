@@ -508,9 +508,58 @@ pub fn main(init: std.process.Init) !void {
             }
         }
 
-        switch (ui.mouse) {
-            .input, .on_chat => {
-                const chat_win = ui.chat_win;
+        if (ui.curr_user) |c_idx| {
+            const c = &state.clients.items[c_idx];
+            const chat_win = ui.chat_win;
+            if (!c.connected) {
+                const btn_w = 200;
+                const btn_h = 50;
+                const bx = chat_win.x + (chat_win.w - btn_w) / 2;
+                const by = (chat_win.h - btn_h) / 2;
+                const btn_rect = sdl.FRect{
+                    .x = @floatFromInt(bx),
+                    .y = @floatFromInt(by),
+                    .w = @floatFromInt(btn_w),
+                    .h = @floatFromInt(btn_h),
+                };
+                const inner_color = gui.washColor(ui.bg, .{ .n = 8 });
+                const border_color = gui.washColor(ui.bg, .{ .n = 12 });
+                _ = gui.drawBRect(g_renderer, &btn_rect, 2.0, border_color, inner_color);
+
+                renderTextCentered(g_renderer, ui.font, "Connect", ui.font_color, btn_rect);
+            } else {
+                const tb = chat_win.top_bar;
+                const tb_rect = sdl.FRect{
+                    .x = @floatFromInt(chat_win.x),
+                    .y = 0,
+                    .w = @floatFromInt(chat_win.w),
+                    .h = @floatFromInt(tb.h),
+                };
+                const tb_color = gui.washColor(ui.bg, .{ .n = 7 });
+                _ = sdl.render.setDrawColor(g_renderer, tb_color);
+                _ = sdl.render.fillRect(g_renderer, &tb_rect);
+
+                const btn_rect = sdl.FRect{
+                    .x = @floatFromInt(chat_win.x + chat_win.w - tb.btn_w - chat_win.pad),
+                    .y = @floatFromInt((tb.h - tb.btn_h) / 2),
+                    .w = @floatFromInt(tb.btn_w),
+                    .h = @floatFromInt(tb.btn_h),
+                };
+                const btn_inner = gui.washColor(ui.bg, .{ .n = 10 });
+                const btn_border = gui.washColor(ui.bg, .{ .n = 14 });
+                _ = gui.drawBRect(g_renderer, &btn_rect, 1.0, btn_border, btn_inner);
+                renderTextCentered(g_renderer, ui.font, "Disconnect", ui.font_color, btn_rect);
+
+                const status_rect = sdl.FRect{
+                    .x = @floatFromInt(chat_win.x + chat_win.pad * 3),
+                    .y = @floatFromInt((tb.h - tb.btn_h) / 2),
+                    .w = @floatFromInt(tb.btn_w),
+                    .h = @floatFromInt(tb.btn_h),
+                };
+                const status_str: [:0]const u8 = if (c.online) "Online" else "Offline";
+                const status_color = if (c.online) sdl.Color{ .r = 0x50, .g = 0xc8, .b = 0x50, .a = 0xff } else sdl.Color{ .r = 0x88, .g = 0x88, .b = 0x88, .a = 0xff };
+                renderTextCentered(g_renderer, ui.font, status_str, status_color, status_rect);
+
                 const input_box = sdl.FRect{
                     .x = @floatFromInt(chat_win.x),
                     .y = @floatFromInt(chat_win.h),
@@ -526,32 +575,196 @@ pub fn main(init: std.process.Init) !void {
                     border_color,
                     inner_color,
                 );
-                const bordered_send = false;
+
+                const input_clip_rect = sdl.Rect{
+                    .x = @intCast(chat_win.x),
+                    .y = @intCast(chat_win.h),
+                    .w = @intCast(chat_win.input_box.w),
+                    .h = @intCast(chat_win.input_box.h),
+                };
+                _ = sdl.render.setRenderClipRect(g_renderer, &input_clip_rect);
+
+                if (c.input.items.len > 0 or ui.mouse == .input) {
+                    var in_txt = std.ArrayList(u8).empty;
+                    defer in_txt.deinit(ga);
+                    in_txt.appendSlice(ga, c.input.items) catch {};
+                    if (c.input.items.len > 0 and c.input.items[c.input.items.len - 1] == '\n') {
+                        in_txt.append(ga, ' ') catch {};
+                    }
+                    in_txt.append(ga, 0) catch {};
+
+                    var tex_w: f32 = 0;
+                    var tex_h: f32 = 0;
+
+                    if (c.input.items.len > 0) {
+                        const wrap_len: c_int = @as(c_int, @intCast(chat_win.input_box.w)) - 20;
+                        if (sdl.ttf.renderTextBlendedWrapped(ui.font, in_txt.items[0 .. in_txt.items.len - 1 :0].ptr, in_txt.items.len - 1, ui.font_color, wrap_len)) |surf| {
+                            defer sdl.surface.destroy(surf);
+                            if (sdl.createTextureFromSurface(g_renderer, surf)) |tex| {
+                                defer sdl.destroyTexture(tex);
+                                if (sdl.getTextureSize(tex, &tex_w, &tex_h)) {
+                                    var text_y_start: f32 = input_box.y + 10.0;
+                                    if (tex_h < input_box.h - 20.0) {
+                                        text_y_start = input_box.y + (input_box.h - tex_h) / 2.0;
+                                    }
+                                    const max_scroll = @max(0.0, tex_h - input_box.h + 20.0);
+                                    if (ui.chat_win.input_box.scroll > max_scroll) {
+                                        ui.chat_win.input_box.scroll = max_scroll;
+                                    }
+                                    const dst = sdl.FRect{
+                                        .x = input_box.x + 10,
+                                        .y = text_y_start - ui.chat_win.input_box.scroll,
+                                        .w = tex_w,
+                                        .h = tex_h,
+                                    };
+                                    _ = sdl.renderTexture(g_renderer, tex, null, &dst);
+                                }
+                            }
+                        }
+                    }
+
+                    if (ui.mouse == .input) {
+                        const current_time = sdl.getTicks();
+                        if (current_time - ui.text_cursor.last_toggle > 500) {
+                            ui.text_cursor.visible = !ui.text_cursor.visible;
+                            ui.text_cursor.last_toggle = current_time;
+                        }
+                        if (ui.text_cursor.visible) {
+                            var cursor_x: f32 = input_box.x + 10;
+                            var cursor_y: f32 = input_box.y + (input_box.h - 20) / 2 - ui.chat_win.input_box.scroll;
+                            var cursor_h: f32 = 20.0;
+                            if (c.input.items.len > 0) {
+                                // measure single line height
+                                var sh: c_int = 0;
+                                _ = sdl.ttf.getStringSize(ui.font, "A", 1, null, &sh);
+                                cursor_h = @as(f32, @floatFromInt(sh));
+
+                                // calculate X based on the last line (split by \n)
+                                var last_line_start: usize = 0;
+                                const raw_input = c.input.items;
+                                for (raw_input, 0..) |char, i| {
+                                    if (char == '\n') last_line_start = i + 1;
+                                }
+                                const last_line = raw_input[last_line_start..raw_input.len];
+                                var cw: c_int = 0;
+                                if (last_line.len > 0 and sdl.ttf.getStringSize(ui.font, @ptrCast(last_line.ptr), last_line.len, &cw, null)) {
+                                    const wrap_len = @as(c_int, @intCast(chat_win.input_box.w)) - 20;
+                                    var cx = @as(c_int, @intCast(cw));
+                                    while (cx > wrap_len) cx -= wrap_len;
+                                    cursor_x += @as(f32, @floatFromInt(cx));
+                                }
+
+                                var text_y_start: f32 = input_box.y + 10.0;
+                                if (tex_h < input_box.h - 20.0) {
+                                    text_y_start = input_box.y + (input_box.h - tex_h) / 2.0;
+                                }
+                                // Place cursor at the bottom of the text block
+                                cursor_y = text_y_start - ui.chat_win.input_box.scroll + tex_h - cursor_h;
+                            }
+                            const cursor_rect = sdl.FRect{
+                                .x = cursor_x,
+                                .y = cursor_y,
+                                .w = 2.0,
+                                .h = cursor_h,
+                            };
+                            _ = sdl.render.setDrawColor(g_renderer, sdl.Color{ .r = 255, .g = 255, .b = 255, .a = 255 });
+                            _ = sdl.render.fillRect(g_renderer, &cursor_rect);
+                        }
+                    }
+                }
+
+                _ = sdl.render.setRenderClipRect(g_renderer, null);
+
                 const send_bg_rect = sdl.FRect{
                     .x = @floatFromInt(chat_win.x + chat_win.input_box.w - chat_win.pad),
                     .y = input_box.y,
                     .w = @floatFromInt(2 * chat_win.pad + 2 * chat_win.send_r),
                     .h = input_box.h,
                 };
-                if (!bordered_send) {
-                    _ = sdl.render.setDrawColor(g_renderer, border_color);
-                    _ = sdl.render.fillRect(g_renderer, &send_bg_rect);
-                } else {
-                    _ = gui.drawBRect(
-                        g_renderer,
-                        &send_bg_rect,
-                        @floatFromInt(chat_win.pad),
-                        border_color,
-                        inner_color,
-                    );
+                _ = sdl.render.setDrawColor(g_renderer, border_color);
+                _ = sdl.render.fillRect(g_renderer, &send_bg_rect);
+                const send_btn_bg = gui.washColor(ui.bg, .{ .n = 10 });
+                _ = sdl.render.setDrawColor(g_renderer, send_btn_bg);
+                const cx: f32 = @floatFromInt(chat_win.x + (chat_win.w + chat_win.input_box.w) / 2);
+                const cy: f32 = @floatFromInt(chat_win.h + chat_win.input_box.h / 2);
+                _ = gui.drawCircle(g_renderer, @intFromFloat(cx), @intFromFloat(cy), chat_win.send_r);
+
+                const send_btn_color = sdl.FColor{ .r = 37.0 / 255.0, .g = 211.0 / 255.0, .b = 102.0 / 255.0, .a = 1.0 };
+                // Offset cx slightly right for visual balance of the triangle
+                _ = gui.drawRightTriangle(g_renderer, cx + 2.0, cy, @as(f32, @floatFromInt(chat_win.send_r)) * 0.9, send_btn_color);
+
+                var msg_y: f32 = @as(f32, @floatFromInt(chat_win.h - 10)) + ui.chat_win.scroll;
+
+                // Add clipping rect for messages
+                const clip_rect = sdl.Rect{
+                    .x = @intCast(chat_win.x),
+                    .y = @intCast(tb.h),
+                    .w = @intCast(chat_win.w),
+                    .h = @intCast(chat_win.h - tb.h),
+                };
+                _ = sdl.render.setRenderClipRect(g_renderer, &clip_rect);
+
+                var m_idx: usize = c.msgs.items.len;
+                while (m_idx > 0) {
+                    m_idx -= 1;
+                    const msg = &c.msgs.items[m_idx];
+                    if (msg.state == .err) continue;
+
+                    const is_own = (msg.rid == state.rid);
+
+                    var msg_txt = std.ArrayList(u8).empty;
+                    defer msg_txt.deinit(ga);
+                    msg_txt.appendSlice(ga, msg.buf) catch {};
+                    msg_txt.append(ga, 0) catch {};
+
+                    const m_color = if (msg.state == .pending) sdl.Color{ .r = 100, .g = 100, .b = 100, .a = 255 } else ui.font_color;
+
+                    const wrap_len: c_int = @as(c_int, @intCast(chat_win.w)) - 80;
+                    if (sdl.ttf.renderTextBlendedWrapped(ui.font, msg_txt.items[0 .. msg_txt.items.len - 1 :0].ptr, msg_txt.items.len - 1, m_color, wrap_len)) |surf| {
+                        defer sdl.surface.destroy(surf);
+                        if (sdl.createTextureFromSurface(g_renderer, surf)) |tex| {
+                            defer sdl.destroyTexture(tex);
+                            var w: f32, var h: f32 = .{ 0, 0 };
+                            if (sdl.getTextureSize(tex, &w, &h)) {
+                                msg_y -= (h + 10); // 10px spacing
+                                if (msg_y > @as(f32, @floatFromInt(chat_win.h))) continue; // below view
+                                if (msg_y + h < @as(f32, @floatFromInt(tb.h))) break; // out of view
+
+                                const dst = sdl.FRect{
+                                    .x = if (is_own) @as(f32, @floatFromInt(chat_win.x + chat_win.w - 20)) - w else @as(f32, @floatFromInt(chat_win.x + 20)),
+                                    .y = msg_y,
+                                    .w = w,
+                                    .h = h,
+                                };
+
+                                // Draw bubble
+                                const bubble = sdl.FRect{
+                                    .x = dst.x - 5,
+                                    .y = dst.y - 5,
+                                    .w = dst.w + 10,
+                                    .h = dst.h + 10,
+                                };
+                                const b_color = if (is_own) gui.washColor(ui.bg, .{ .n = 10 }) else gui.washColor(ui.bg, .{ .n = 8 });
+                                _ = sdl.render.setDrawColor(g_renderer, b_color);
+                                _ = sdl.render.fillRect(g_renderer, &bubble);
+
+                                _ = sdl.renderTexture(g_renderer, tex, null, &dst);
+                            }
+                        }
+                    }
                 }
-                _ = gui.drawCircle(g_renderer, @intCast(chat_win.x + (chat_win.w + chat_win.input_box.w) / 2), @intCast(chat_win.h - chat_win.input_box.h / 2), chat_win.send_r);
-                // TODO: render messages
-            },
-            .to_link => {
-                // TODO: print `to link` message
-            },
-            .on_list => {},
+
+                _ = sdl.render.setRenderClipRect(g_renderer, null);
+
+                // Clamp message scrolling
+                if (ui.chat_win.scroll > 0) {
+                    const top_limit = @as(f32, @floatFromInt(tb.h)) + 10.0;
+                    if (msg_y > top_limit) {
+                        const excess = msg_y - top_limit;
+                        ui.chat_win.scroll = @max(0, ui.chat_win.scroll - excess);
+                    }
+                }
+            }
         }
 
         _ = sdl.render.setDrawColor(g_renderer, ui.sep_color);
