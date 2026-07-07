@@ -1,11 +1,20 @@
-pub fn handshakeWithServer(init: *const std.process.Init, profile_dir: std.Io.Dir, s: *net.Stream) !void {
-    const io = init.io;
-    var buf: [1024]u8 = undefined;
+const std = @import("std");
+const types = @import("types");
+const Set = types.Set;
+const Packet = types.Packet;
+const Data = types.Data;
+const State = types.CClient;
+const net = std.Io.net;
 
+pub fn handshakeWithServer(init: *const std.process.Init, profile_dir: std.Io.Dir, s_reader: *std.Io.Reader, s_writer: *std.Io.Writer) !void {
+    const io = init.io;
+
+    var buf: [1024]u8 = undefined;
     const token_file = try profile_dir.createFile(io, "token", .{ .truncate = false, .read = true });
     defer token_file.close(io);
 
-    const new_user = (try token_file.stat(init.io)).size == 0;
+    const file_size = (try token_file.stat(io)).size;
+    const new_user = file_size == 0;
     if (new_user) {
         var token_bytes: [16]u8 = undefined;
         io.random(&token_bytes);
@@ -21,13 +30,8 @@ pub fn handshakeWithServer(init: *const std.process.Init, profile_dir: std.Io.Di
     const t_reader = &token_r.interface;
     const token = try t_reader.take(32);
 
-    var s_writer_file = s.writer(io, buf[40..80]);
-    const s_writer = &s_writer_file.interface;
     try s_writer.print("{s} {s}\n", .{ if (new_user) "NEW" else "OLD", token });
     try s_writer.flush();
-
-    var s_reader_file = s.reader(io, buf[80..]);
-    const s_reader = &s_reader_file.interface;
 
     const slen = try s_reader.takeDelimiter(' ') orelse return error.ReadError;
     const len = try std.fmt.parseInt(usize, slen, 10);
@@ -227,13 +231,6 @@ pub fn formatUsers(state: *const State, users: []const Data.Infos) ![]u8 {
     return msg.toOwnedSlice(aa);
 }
 
-const std = @import("std");
-const net = std.Io.net;
-const bufPrint = std.fmt.bufPrint;
-const types = @import("types");
-const Packet = types.Packet;
-const Data = types.Data;
-const State = types.CClient;
 const utils = @import("utils");
 const checkLock = utils.checkLock;
 const eql = std.mem.eql;

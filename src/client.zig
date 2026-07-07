@@ -114,7 +114,7 @@ pub fn main(init: std.process.Init) !void {
     posix.sigaction(posix.SIG.INT, &sa, null);
     posix.sigaction(posix.SIG.HUP, &sa, null);
 
-    client_mod.handshakeWithServer(&init, profile_dir, &G.stream) catch |err| {
+    client_mod.handshakeWithServer(&init, profile_dir, reader, writer) catch |err| {
         std.debug.print("Handshake failed with {any}.\n", .{err});
         return;
     };
