@@ -1,12 +1,4 @@
-const std = @import("std");
-const types = @import("types");
-const Set = types.Set;
-const Packet = types.Packet;
-const Data = types.Data;
-const State = types.CClient;
-const net = std.Io.net;
-
-pub fn handshakeWithServer(init: *const std.process.Init, profile_dir: std.Io.Dir, s_reader: *std.Io.Reader, s_writer: *std.Io.Writer) !void {
+pub fn handshakeWithServer(init: *const std.process.Init, profile_dir: Io.Dir, s_reader: *Io.Reader, s_writer: *Io.Writer) !void {
     const io = init.io;
 
     var buf: [1024]u8 = undefined;
@@ -38,12 +30,13 @@ pub fn handshakeWithServer(init: *const std.process.Init, profile_dir: std.Io.Di
     const msg = try s_reader.readAlloc(init.gpa, len);
     defer init.gpa.free(msg);
 
-    if (std.mem.eql(u8, "OK", msg)) return;
+    if (eql(u8, "OK", msg)) return;
     return error.HandshakeFailed;
 }
 
 pub fn parsePacket(state: *State, msg: []const u8) !?Packet {
     var itr = std.mem.tokenizeScalar(u8, msg, ' ');
+    const aa = state.aa;
 
     const header = itr.next() orelse return null;
     if (eql(u8, header, "ECHO")) {
@@ -51,7 +44,7 @@ pub fn parsePacket(state: *State, msg: []const u8) !?Packet {
         return Packet{
             .rid = state.rid,
             .data = .{
-                .echo = try state.aa.dupe(u8, std.mem.trim(u8, to_echo, " ")),
+                .echo = try aa.dupe(u8, std.mem.trim(u8, to_echo, " ")),
             },
         };
     } else if (eql(u8, header, "WHOAMI")) {
@@ -65,7 +58,7 @@ pub fn parsePacket(state: *State, msg: []const u8) !?Packet {
         const name = itr.next() orelse return Packet{
             .rid = state.rid,
             .data = .{
-                .err = try state.aa.dupe(u8, "No id or name specified."),
+                .err = try aa.dupe(u8, "No id or name specified."),
             },
         };
         var num_count: usize = 0;
@@ -75,34 +68,34 @@ pub fn parsePacket(state: *State, msg: []const u8) !?Packet {
         if (num_count == name.len) return Packet{
             .rid = state.rid,
             .data = .{
-                .err = try state.aa.dupe(u8, "All numeric name is not allowed."),
+                .err = try aa.dupe(u8, "All numeric name is not allowed."),
             },
         };
         if (eql(u8, name, state.name)) return null;
         return Packet{
             .rid = state.rid,
             .data = .{
-                .name = try state.aa.dupe(u8, name),
+                .name = try aa.dupe(u8, name),
             },
         };
     } else if (eql(u8, header, "LINK")) {
         const buf = itr.next() orelse return Packet{
             .rid = state.rid,
             .data = .{
-                .err = try state.aa.dupe(u8, "No id or name specified."),
+                .err = try aa.dupe(u8, "No id or name specified."),
             },
         };
         if (eql(u8, buf, state.name) or std.fmt.parseInt(usize, buf, 10) catch std.math.maxInt(usize) == state.rid) return Packet{
             .rid = state.rid,
             .data = .{
-                .err = try state.aa.dupe(u8, "Self link."),
+                .err = try aa.dupe(u8, "Self link."),
             },
         };
         return Packet{
             .rid = state.rid,
             .data = .{
                 .link = .{
-                    .with = try state.aa.dupe(u8, buf),
+                    .with = try aa.dupe(u8, buf),
                 },
             },
         };
@@ -110,20 +103,20 @@ pub fn parsePacket(state: *State, msg: []const u8) !?Packet {
         const buf = itr.next() orelse return Packet{
             .rid = state.rid,
             .data = .{
-                .err = try state.aa.dupe(u8, "No id or name specified."),
+                .err = try aa.dupe(u8, "No id or name specified."),
             },
         };
         if (eql(u8, buf, state.name) or std.fmt.parseInt(usize, buf, 10) catch std.math.maxInt(usize) == state.rid) return Packet{
             .rid = state.rid,
             .data = .{
-                .err = try state.aa.dupe(u8, "Self unlink."),
+                .err = try aa.dupe(u8, "Self unlink."),
             },
         };
         return Packet{
             .rid = state.rid,
             .data = .{
                 .link = .{
-                    .with = try state.aa.dupe(u8, buf),
+                    .with = try aa.dupe(u8, buf),
                     .invert = true,
                 },
             },
@@ -132,7 +125,7 @@ pub fn parsePacket(state: *State, msg: []const u8) !?Packet {
         const buf = itr.next() orelse return Packet{
             .rid = state.rid,
             .data = .{
-                .err = try state.aa.dupe(u8, "No id or name specified."),
+                .err = try aa.dupe(u8, "No id or name specified."),
             },
         };
         const to_send = std.mem.trim(u8, itr.rest(), " \n");
@@ -145,15 +138,15 @@ pub fn parsePacket(state: *State, msg: []const u8) !?Packet {
         if (eql(u8, buf, state.name) or std.fmt.parseInt(usize, buf, 10) catch std.math.maxInt(usize) == state.rid) return Packet{
             .rid = state.rid,
             .data = .{
-                .err = try state.aa.dupe(u8, "Self message."),
+                .err = try aa.dupe(u8, "Self message."),
             },
         };
         return Packet{
             .rid = state.rid,
             .data = .{
                 .msg = .{
-                    .peer = try state.aa.dupe(u8, buf),
-                    .buf = try state.aa.dupe(u8, to_send),
+                    .peer = try aa.dupe(u8, buf),
+                    .buf = try aa.dupe(u8, to_send),
                 },
             },
         };
@@ -163,24 +156,24 @@ pub fn parsePacket(state: *State, msg: []const u8) !?Packet {
             .rid = state.rid,
             .data = .{
                 .msg = .{
-                    .buf = try state.aa.dupe(u8, to_send),
+                    .buf = try aa.dupe(u8, to_send),
                 },
             },
         };
     } else if (eql(u8, header, "GETINFO")) {
         var arr: std.ArrayList([]u8) = .empty;
         var bitr = std.mem.tokenizeScalar(u8, itr.rest(), ' ');
-        while (bitr.next()) |to_fetch| try arr.append(state.aa, try state.aa.dupe(u8, to_fetch));
+        while (bitr.next()) |to_fetch| try arr.append(aa, try aa.dupe(u8, to_fetch));
         return Packet{
             .rid = state.rid,
             .data = .{
-                .to_get = try arr.toOwnedSlice(state.aa),
+                .to_get = try arr.toOwnedSlice(aa),
             },
         };
     } else return Packet{
         .rid = state.rid,
         .data = .{
-            .err = try allocPrint(state.aa, "Invalid cmd {s}.", .{header}),
+            .err = try allocPrint(aa, "Invalid cmd {s}.", .{header}),
         },
     };
 }
@@ -231,6 +224,14 @@ pub fn formatUsers(state: *const State, users: []const Data.Infos) ![]u8 {
     return msg.toOwnedSlice(aa);
 }
 
+const std = @import("std");
+const Io = std.Io;
+const net = Io.net;
+const types = @import("types");
+const Set = types.Set;
+const Packet = types.Packet;
+const Data = types.Data;
+const State = types.CClient;
 const utils = @import("utils");
 const checkLock = utils.checkLock;
 const eql = std.mem.eql;

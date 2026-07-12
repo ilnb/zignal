@@ -1,6 +1,26 @@
 pub fn handleClient(client: *Client, state: *State) !void {
     var buf: [1024]u8 = undefined;
-    // defer cleanupClient(client, state) catch {};
+    defer {
+        for (state.clients.items) |c| {
+            if (!c.online) continue;
+            if (c.rid == client.rid) {
+                @branchHint(.unlikely);
+                continue;
+            }
+            c.writer_mutex.lock(state.io) catch continue;
+            defer c.writer_mutex.unlock(state.io);
+
+            var cwriter = c.conn.writer(state.io, &buf);
+            const cw = &cwriter.interface;
+            c.sendData(cw, .{
+                .update_user = .{
+                    .rid = client.rid,
+                    .online = false,
+                },
+            }, null) catch break orelse continue;
+        }
+        cleanupClient(client, state) catch {};
+    }
     const conn = client.conn;
     info("Accepted connection from {f}, {d}", .{ conn.socket.address, client.rid });
 
@@ -65,7 +85,7 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
             } else {
                 info("Corrupted tokens list. Client with {d} not found.", .{client.rid});
                 try client.sendData(w, Data{
-                    .err = "ERR: Corrupted tokens list on server. Client not found.",
+                    .err = "Corrupted tokens list on server. Client not found.",
                 }, parsed_value.id) orelse return;
                 return;
             };
@@ -73,7 +93,7 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
             state.ga.free(token.name);
             token.name = state.ga.dupe(u8, name) catch |err| {
                 info("Failed to set name for {d}: {any}", .{ client.rid, err });
-                const e = try allocPrint(aa, "ERR: Failed to set name: {any}", .{err});
+                const e = try allocPrint(aa, "Failed to set name: {any}", .{err});
                 defer aa.free(e);
                 try client.writer_mutex.lock(io);
                 defer client.writer_mutex.unlock(io);
@@ -100,7 +120,7 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
             try state.mutex.lock(io);
             defer state.mutex.unlock(io);
             const i = getClientById(state, p.with) orelse getClientByName(state, p.with) orelse {
-                const e = try allocPrint(aa, "ERR: Failed to link to {s}. Invalid id or name.", .{p.with});
+                const e = try allocPrint(aa, "Failed to link to {s}. Invalid id or name.", .{p.with});
                 defer aa.free(e);
                 try client.writer_mutex.lock(io);
                 defer client.writer_mutex.unlock(io);
@@ -115,12 +135,7 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
                 if (try unlinkClients(client, c2, state)) ret = 2;
             }
             try client.writer_mutex.lock(io);
-            if (parsed_value.id) |id| {
-                try client.sendData(w, Data{ .ack = id }, id) orelse return;
-            } else {
-                client.errWriteAll(w, "") orelse return;
-                client.errFlush(w) orelse return;
-            }
+            try client.sendData(w, Data{ .ack = parsed_value.id.? }, parsed_value.id.?) orelse return;
             client.writer_mutex.unlock(io);
             if (ret != 0) {
                 const add = ret == 1;
@@ -154,7 +169,7 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
                 try state.mutex.lock(io);
                 defer state.mutex.unlock(io);
                 const i = getClientById(state, ibuf) orelse getClientByName(state, ibuf) orelse {
-                    const e = try allocPrint(aa, "ERR: Failed to send message to {s}. Invalid id or name.", .{p.buf});
+                    const e = try allocPrint(aa, "Failed to send message to {s}. Invalid id or name.", .{p.buf});
                     defer aa.free(e);
                     try client.writer_mutex.lock(io);
                     defer client.writer_mutex.unlock(io);
@@ -163,14 +178,14 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
                 };
                 const c = state.clients.items[i];
                 if (state.links.getPtr(client.rid).?.find(c.rid) == null) {
-                    const e = try allocPrint(aa, "ERR: Not connected to {d}.", .{c.rid});
+                    const e = try allocPrint(aa, "Not connected to {d}.", .{c.rid});
                     defer aa.free(e);
                     try client.writer_mutex.lock(io);
                     defer client.writer_mutex.unlock(io);
                     try client.sendData(w, Data{ .err = e }, parsed_value.id) orelse return;
                     return;
                 } else if (!c.online) {
-                    const e = try allocPrint(aa, "ERR: Client {d} is offline.", .{c.rid});
+                    const e = try allocPrint(aa, "Client {d} is offline.", .{c.rid});
                     defer aa.free(e);
                     try client.writer_mutex.lock(io);
                     defer client.writer_mutex.unlock(io);
@@ -212,12 +227,7 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
             }
             try client.writer_mutex.lock(io);
             defer client.writer_mutex.unlock(io);
-            if (parsed_value.id) |id| {
-                try client.sendData(w, Data{ .ack = id }, id) orelse return;
-            } else {
-                client.errWriteAll(w, "") orelse return;
-                client.errFlush(w) orelse return;
-            }
+            try client.sendData(w, Data{ .ack = parsed_value.id.? }, parsed_value.id.?) orelse return;
         },
         .to_get => |p| {
             try state.mutex.lock(io);
@@ -226,7 +236,7 @@ fn parseHeaderAndAct(client: *Client, msg: []const u8, state: *State) !void {
             if (p.len != 0) {
                 for (p) |c2| {
                     const i = getClientById(state, c2) orelse getClientByName(state, c2) orelse {
-                        const e = try allocPrint(aa, "ERR: Failed to getinfo of {s}. Invalid id or name.", .{c2});
+                        const e = try allocPrint(aa, "Failed to getinfo of {s}. Invalid id or name.", .{c2});
                         defer aa.free(e);
                         try client.writer_mutex.lock(io);
                         defer client.writer_mutex.unlock(io);
@@ -378,24 +388,6 @@ fn cleanupClient(client: *Client, state: *State) !void {
     // }
 
     client.online = false;
-    var buf: [1024]u8 = undefined;
-    for (state.clients.items) |c| {
-        if (c.rid == client.rid) {
-            @branchHint(.unlikely);
-            continue;
-        }
-        c.writer_mutex.lock(state.io) catch continue;
-        defer c.writer_mutex.unlock(state.io);
-
-        var cwriter = c.conn.writer(state.io, &buf);
-        const cw = &cwriter.interface;
-        c.sendData(cw, .{
-            .update_user = .{
-                .rid = client.rid,
-                .online = client.online,
-            },
-        }, null) catch break orelse continue;
-    }
 
     // const links = &state.links;
     // for (clients.items) |c| {

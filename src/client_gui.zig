@@ -163,7 +163,7 @@ pub fn main(init: std.process.Init) !void {
         .aa = aa,
         .ga = ga,
         .io = init.io,
-        .cset = .init(ga, utils.usizeCmp),
+        .cset = .init(ga),
         .pset = types.Set(State.PktMsgMap).init(ga, struct {
             fn cmp(a: State.PktMsgMap, b: State.PktMsgMap) std.math.Order {
                 return std.math.order(a.id, b.id);
@@ -180,11 +180,6 @@ pub fn main(init: std.process.Init) !void {
     defer recv_thread.join();
 
     var keys_held = [_]bool{false} ** 512;
-    const sep_rect: sdl.FRect = .{
-        .x = @floatFromInt(ui.user_box.w),
-        .w = @floatFromInt(ui.sep_width),
-        .h = @floatFromInt(ui.h),
-    };
 
     // // Performance test: count frames
     // var frame_count: u32 = 0;
@@ -234,7 +229,7 @@ pub fn main(init: std.process.Init) !void {
                             ui.mouse = .on_list;
                             continue;
                         }
-                        const scroll_int: usize = @intFromFloat(ui.user_box.scroll);
+                        const scroll_int: usize = @trunc(ui.user_box.scroll);
                         const my_scrolled = my + scroll_int;
                         const idx: usize = my_scrolled / ui.user_box.h;
                         if (idx >= len) {
@@ -449,8 +444,16 @@ pub fn main(init: std.process.Init) !void {
                                 state.name = try state.ga.dupe(u8, i);
                             },
                             .new_user => |n| {
-                                if (state.cset.find(n.rid) != null) continue;
-                                try state.cset.put(n.rid);
+                                if (state.cset.get(n.rid)) |idx| {
+                                    const c = &state.clients.items[idx];
+                                    c.online = n.online;
+                                    if (!std.mem.eql(u8, c.name, n.name)) {
+                                        state.ga.free(c.name);
+                                        c.name = try state.ga.dupe(u8, n.name);
+                                    }
+                                    continue;
+                                }
+                                try state.cset.put(n.rid, state.clients.items.len);
 
                                 try state.clients.append(state.ga, .{
                                     .name = try state.ga.dupe(u8, n.name),
@@ -560,7 +563,7 @@ pub fn main(init: std.process.Init) !void {
         for (state.clients.items, 0..) |*c, i| {
             const crect = sdl.Rect{
                 .x = 0,
-                .y = @as(c_int, @intCast(i * ui.user_box.h)) - @as(c_int, @intFromFloat(ui.user_box.scroll)) - @as(c_int, @intCast(ui.user_box.pad * @intFromBool(i != 0))),
+                .y = @as(c_int, @intCast(i * ui.user_box.h)) - @as(c_int, @trunc(ui.user_box.scroll)) - @as(c_int, @intCast(ui.user_box.pad * @intFromBool(i != 0))),
                 .h = @intCast(ui.user_box.h),
                 .w = @intCast(ui.user_box.w),
             };
@@ -794,9 +797,9 @@ pub fn main(init: std.process.Init) !void {
                 _ = sdl.render.fillRect(g_renderer, &send_bg_rect);
                 const send_btn_bg = gui.washColor(ui.bg, .{ .n = 10 });
                 _ = sdl.render.setDrawColor(g_renderer, send_btn_bg);
-                const cx: f32 = @floatFromInt(chat_win.x + (chat_win.w + chat_win.input_box.w) / 2);
-                const cy: f32 = @floatFromInt(chat_win.h + chat_win.input_box.h / 2);
-                _ = gui.drawCircle(g_renderer, @intFromFloat(cx), @intFromFloat(cy), chat_win.send_r);
+                const cx: f32 = send_bg_rect.x + send_bg_rect.w / 2.0;
+                const cy: f32 = send_bg_rect.y + send_bg_rect.h / 2.0;
+                _ = gui.drawCircle(g_renderer, @trunc(cx), @trunc(cy), chat_win.send_r);
 
                 const send_btn_color = sdl.FColor{
                     .r = 37.0 / 255.0,
@@ -890,6 +893,11 @@ pub fn main(init: std.process.Init) !void {
             }
         }
 
+        const sep_rect: sdl.FRect = .{
+            .x = @floatFromInt(ui.user_box.w),
+            .w = @floatFromInt(ui.sep_width),
+            .h = @floatFromInt(ui.h),
+        };
         _ = sdl.render.setDrawColor(g_renderer, ui.sep_color);
         _ = sdl.render.rect(g_renderer, &sep_rect);
 

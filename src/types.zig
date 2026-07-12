@@ -147,10 +147,10 @@ pub const Server = struct {
 };
 
 pub const CClient = struct {
-    pub const PendingMsg = struct { id: usize, buf: []const u8 };
+    pub const PendingReq = struct { id: usize, buf: []const u8 = "" };
     rid: usize = undefined,
     name: []u8 = undefined,
-    cset: Set(PendingMsg) = undefined,
+    cset: Set(PendingReq) = undefined,
     packet_id_counter: usize = 0,
     aa: Allocator,
     io: Io,
@@ -175,7 +175,7 @@ pub const GClient = struct {
     name: ?[]u8 = null,
     packet_id_counter: usize = 1,
     clients: AL(Client) = .empty,
-    cset: Set(usize),
+    cset: HM(usize, usize),
     pset: Set(PktMsgMap) = undefined,
     aa: Allocator,
     ga: Allocator,

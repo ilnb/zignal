@@ -123,8 +123,8 @@ pub fn main(init: std.process.Init) !void {
         .aa = aa,
         .io = G.io,
         .packet_id_counter = 1,
-        .cset = types.Set(State.PendingMsg).init(aa, struct {
-            fn cmp(a: State.PendingMsg, b: State.PendingMsg) std.math.Order {
+        .cset = types.Set(State.PendingReq).init(aa, struct {
+            fn cmp(a: State.PendingReq, b: State.PendingReq) std.math.Order {
                 return std.math.order(a.id, b.id);
             }
         }.cmp),
@@ -195,7 +195,7 @@ pub fn main(init: std.process.Init) !void {
                     var pkt = packet;
                     pkt.id = state.packet_id_counter;
                     state.packet_id_counter += 1;
-                    
+
                     try state.cset.put(.{ .id = pkt.id.?, .buf = try aa.dupe(u8, msg) });
 
                     const to_send = try Stringify.valueAlloc(state.aa, pkt, .{ .whitespace = .indent_2 });
@@ -353,22 +353,23 @@ fn recvFn(r: *Io.Reader, stdout: *Io.Writer, state: *State) !void {
             },
             .err => |e| {
                 if (parsed_value.id) |id| {
-                    if (state.cset.find(.{ .id = id, .buf = "" })) |node| {
+                    if (state.cset.find(.{ .id = id })) |node| {
                         const orig = node.key.buf;
+                        defer aa.free(orig);
                         const emsg = try std.fmt.allocPrint(aa, "Error sending '{s}': {s}", .{ orig, e });
                         defer aa.free(emsg);
                         try printMsg(emsg, stdout);
-                        aa.free(orig);
                         state.cset.remove(node.key);
                     } else {
                         try printMsg(e, stdout);
                     }
                 } else {
+                    G.running.store(false, .release);
                     try printMsg(e, stdout);
                 }
             },
             .ack => |id| {
-                if (state.cset.find(.{ .id = id, .buf = "" })) |node| {
+                if (state.cset.find(.{ .id = id })) |node| {
                     aa.free(node.key.buf);
                     state.cset.remove(node.key);
                 }

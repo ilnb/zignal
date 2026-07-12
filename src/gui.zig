@@ -129,7 +129,7 @@ pub inline fn drawBRect(r: *sdl.Renderer, rect: *const sdl.FRect, pad: f32, bord
 
 pub inline fn washColor(color: sdl.Color, ratio: WashRatio) sdl.Color {
     const n = ratio.n;
-    const d = ratio.d orelse (n + 1);
+    const d = ratio.d orelse n + 1;
     var white_washed: sdl.Color = undefined;
     inline for (@typeInfo(sdl.Color).@"struct".fields) |f| {
         const washed_color = (@as(u32, @intCast(@field(color, f.name))) * n + 0xff) / d;
@@ -156,7 +156,7 @@ pub inline fn modColor(color: anytype, gain: f32) @TypeOf(color) {
             @field(ret, f.name) = std.math.clamp((1.0 + gain) * val, 0.0, 1.0);
         } else {
             const scaled = (1.0 + gain) * @as(f32, @floatFromInt(val));
-            @field(ret, f.name) = @intFromFloat(std.math.clamp(scaled, 0.0, 255.0));
+            @field(ret, f.name) = @trunc(std.math.clamp(scaled, 0.0, 255.0));
         }
     }
     ret.a = color.a;
