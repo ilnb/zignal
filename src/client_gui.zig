@@ -204,15 +204,22 @@ pub fn main(init: std.process.Init) !void {
                 sdl.EVENT_MOUSE_WHEEL => {
                     const my = ev.wheel.y;
                     const scroll_speed: f32 = 30.0;
-                    switch (ui.mouse) {
+                    lbl: switch (ui.mouse) {
                         .on_list => {
-                            ui.user_box.scroll = @max(0, ui.user_box.scroll + my * scroll_speed);
+                            const max_scroll = @max(0.0, @as(f32, @floatFromInt(state.clients.items.len * ui.user_box.h)) - @as(f32, @floatFromInt(ui.h)));
+                            ui.user_box.scroll = std.math.clamp(ui.user_box.scroll - my * scroll_speed, 0.0, max_scroll);
                         },
                         .on_chat => {
                             ui.chat_win.scroll = @max(0, ui.chat_win.scroll + my * scroll_speed);
                         },
                         .input => {
-                            ui.chat_win.input_box.scroll = @max(0, ui.chat_win.input_box.scroll + my * scroll_speed);
+                            const input_box = ui.chat_win.input_box;
+                            const max_scroll = @max(0.0, input_box.tex_h - (@as(f32, @floatFromInt(input_box.h)) - 20.0));
+                            if (max_scroll > 0) {
+                                ui.chat_win.input_box.scroll = std.math.clamp(input_box.scroll - my * scroll_speed, 0.0, max_scroll);
+                            } else {
+                                continue :lbl .on_chat;
+                            }
                         },
                         else => {},
                     }
@@ -393,7 +400,6 @@ pub fn main(init: std.process.Init) !void {
                                         }
                                         c.input.shrinkRetainingCapacity(0);
                                     }
-                                    ui.chat_win.input_box.scroll = 0;
                                 },
                                 else => {},
                             }
@@ -422,7 +428,6 @@ pub fn main(init: std.process.Init) !void {
                             for (text) |ch| {
                                 if (ch >= 32) try c.input.append(state.ga, ch);
                             }
-                            ui.chat_win.input_box.scroll = std.math.floatMax(f32);
                         },
                     }
                 },
@@ -619,6 +624,43 @@ pub fn main(init: std.process.Init) !void {
 
         if (ui.curr_user) |c_idx| {
             const c = &state.clients.items[c_idx];
+
+            var in_txt = AL(u8).empty;
+            defer in_txt.deinit(ga);
+            var in_surf: ?*sdl.Surface = null;
+            defer if (in_surf) |s| sdl.surface.destroy(s);
+            var tex_w: f32 = 0;
+            var tex_h: f32 = 0;
+
+            if (c.input.items.len > 0 or ui.mouse == .input) {
+                in_txt.appendSlice(ga, c.input.items) catch {};
+                if (utils.back(c.input.items) == '\n') {
+                    in_txt.append(ga, ' ') catch {};
+                }
+                in_txt.append(ga, 0) catch {};
+
+                if (c.input.items.len > 0) {
+                    const wrap_len: c_int = @as(c_int, @intCast(ui.chat_win.input_box.w)) - 20;
+                    in_surf = sdl.ttf.renderTextBlendedWrapped(
+                        ui.font,
+                        in_txt.items[0 .. in_txt.items.len - 1 :0].ptr,
+                        in_txt.items.len - 1,
+                        ui.font_color,
+                        wrap_len,
+                    );
+                    if (in_surf) |surf| {
+                        tex_w = @floatFromInt(surf.w);
+                        tex_h = @floatFromInt(surf.h);
+                    }
+                }
+            }
+
+            const default_input_h: f32 = @floatFromInt(ui.chat_win.input_box.h);
+            const max_input_h: f32 = @as(f32, @floatFromInt(ui.h)) * 0.4;
+            const target_h = @max(default_input_h, tex_h + 20.0);
+            ui.chat_win.input_box.h = @intCast(@as(usize, @intFromFloat(@min(max_input_h, target_h))));
+            ui.chat_win.h = ui.h - ui.chat_win.input_box.h;
+
             const chat_win = ui.chat_win;
             if (!c.connected) {
                 const btn_w = 200;
@@ -691,47 +733,22 @@ pub fn main(init: std.process.Init) !void {
                 _ = sdl.render.setRenderClipRect(g_renderer, &input_clip_rect);
 
                 if (c.input.items.len > 0 or ui.mouse == .input) {
-                    var in_txt = std.ArrayList(u8).empty;
-                    defer in_txt.deinit(ga);
-                    in_txt.appendSlice(ga, c.input.items) catch {};
-                    if (utils.back(c.input.items) == '\n') {
-                        in_txt.append(ga, ' ') catch {};
-                    }
-                    in_txt.append(ga, 0) catch {};
-
-                    var tex_w: f32 = 0;
-                    var tex_h: f32 = 0;
-
-                    if (c.input.items.len > 0) {
-                        const wrap_len: c_int = @as(c_int, @intCast(chat_win.input_box.w)) - 20;
-                        if (sdl.ttf.renderTextBlendedWrapped(
-                            ui.font,
-                            in_txt.items[0 .. in_txt.items.len - 1 :0].ptr,
-                            in_txt.items.len - 1,
-                            ui.font_color,
-                            wrap_len,
-                        )) |surf| {
-                            defer sdl.surface.destroy(surf);
-                            if (sdl.createTextureFromSurface(g_renderer, surf)) |tex| {
-                                defer sdl.destroyTexture(tex);
-                                if (sdl.getTextureSize(tex, &tex_w, &tex_h)) {
-                                    var text_y_start: f32 = input_box.y + 10.0;
-                                    if (tex_h < input_box.h - 20.0) {
-                                        text_y_start = input_box.y + (input_box.h - tex_h) / 2.0;
-                                    }
-                                    const max_scroll = @max(0.0, tex_h - input_box.h + 20.0);
-                                    if (ui.chat_win.input_box.scroll > max_scroll) {
-                                        ui.chat_win.input_box.scroll = max_scroll;
-                                    }
-                                    const dst = sdl.FRect{
-                                        .x = input_box.x + 10,
-                                        .y = text_y_start - ui.chat_win.input_box.scroll,
-                                        .w = tex_w,
-                                        .h = tex_h,
-                                    };
-                                    _ = sdl.renderTexture(g_renderer, tex, null, &dst);
-                                }
+                    if (in_surf) |surf| {
+                        if (sdl.createTextureFromSurface(g_renderer, surf)) |tex| {
+                            defer sdl.destroyTexture(tex);
+                            var text_y_start: f32 = input_box.y + 10.0;
+                            if (tex_h < input_box.h - 20.0) {
+                                text_y_start = input_box.y + (input_box.h - tex_h) / 2.0;
+                            } else {
+                                text_y_start = input_box.y + 10.0 - ui.chat_win.input_box.scroll;
                             }
+                            const dst = sdl.FRect{
+                                .x = input_box.x + 10,
+                                .y = text_y_start,
+                                .w = tex_w,
+                                .h = tex_h,
+                            };
+                            _ = sdl.renderTexture(g_renderer, tex, null, &dst);
                         }
                     }
 
@@ -743,7 +760,7 @@ pub fn main(init: std.process.Init) !void {
                         }
                         if (ui.text_cursor.visible) {
                             var cursor_x: f32 = input_box.x + 10;
-                            var cursor_y: f32 = input_box.y + (input_box.h - 20) / 2 - ui.chat_win.input_box.scroll;
+                            var cursor_y: f32 = input_box.y + (input_box.h - 20) / 2;
                             var cursor_h: f32 = 20.0;
                             if (c.input.items.len > 0) {
                                 // measure single line height
@@ -751,27 +768,48 @@ pub fn main(init: std.process.Init) !void {
                                 _ = sdl.ttf.getStringSize(ui.font, "A", 1, null, &sh);
                                 cursor_h = @as(f32, @floatFromInt(sh));
 
-                                // calculate X based on the last line (split by \n)
+                                // calculate cursor_x based on the last line
                                 var last_line_start: usize = 0;
                                 const raw_input = c.input.items;
                                 for (raw_input, 0..) |char, i| {
                                     if (char == '\n') last_line_start = i + 1;
                                 }
                                 const last_line = raw_input[last_line_start..raw_input.len];
-                                var cw: c_int = 0;
-                                if (last_line.len > 0 and sdl.ttf.getStringSize(ui.font, @ptrCast(last_line.ptr), last_line.len, &cw, null)) {
-                                    const wrap_len = @as(c_int, @intCast(chat_win.input_box.w)) - 20;
-                                    var cx = @as(c_int, @intCast(cw));
-                                    while (cx > wrap_len) cx -= wrap_len;
-                                    cursor_x += @as(f32, @floatFromInt(cx));
+                                const wrap_len = @as(c_int, @intCast(chat_win.input_box.w)) - 20;
+
+                                var cline_start: usize = 0;
+                                var cidx: usize = 0;
+                                var space_idx: ?usize = null;
+
+                                while (cidx < last_line.len) {
+                                    if (last_line[cidx] == ' ') space_idx = cidx;
+                                    var w: c_int = 0;
+                                    const slice = last_line[cline_start .. cidx + 1];
+                                    if (sdl.ttf.getStringSize(ui.font, @ptrCast(slice.ptr), slice.len, &w, null)) {
+                                        if (w > wrap_len and slice.len > 1) {
+                                            if (space_idx) |idx| {
+                                                cline_start = idx + 1;
+                                            } else {
+                                                cline_start = cidx;
+                                            }
+                                            space_idx = null;
+                                        }
+                                    }
+                                    cidx += 1;
+                                }
+
+                                const final_line = last_line[cline_start..];
+                                var final_w: c_int = 0;
+                                if (final_line.len > 0 and sdl.ttf.getStringSize(ui.font, @ptrCast(final_line.ptr), final_line.len, &final_w, null)) {
+                                    cursor_x += @as(f32, @floatFromInt(final_w));
                                 }
 
                                 var text_y_start: f32 = input_box.y + 10.0;
                                 if (tex_h < input_box.h - 20.0) {
                                     text_y_start = input_box.y + (input_box.h - tex_h) / 2.0;
                                 }
-                                // Place cursor at the bottom of the text block
-                                cursor_y = text_y_start - ui.chat_win.input_box.scroll + tex_h - cursor_h;
+                                // Place cursor at the right line
+                                cursor_y = text_y_start + cursor_y_offset;
                             }
                             const cursor_rect = sdl.FRect{
                                 .x = cursor_x,
@@ -829,7 +867,7 @@ pub fn main(init: std.process.Init) !void {
 
                     const is_own = (msg.rid == state.rid);
 
-                    var msg_txt = std.ArrayList(u8).empty;
+                    var msg_txt = AL(u8).empty;
                     defer msg_txt.deinit(ga);
                     msg_txt.appendSlice(ga, msg.buf) catch {};
                     msg_txt.append(ga, 0) catch {};
@@ -944,6 +982,7 @@ fn recvFn(r: *Io.Reader, state: *State, recv_ev: c_uint) !void {
 }
 
 const std = @import("std");
+const AL = std.ArrayList;
 const info = std.log.info;
 const Io = std.Io;
 const net = Io.net;

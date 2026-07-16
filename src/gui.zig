@@ -11,6 +11,7 @@ pub const UI = struct {
             w: usize = undefined,
             h: usize = 60,
             scroll: f32 = 0,
+            tex_h: f32 = 0,
         };
         pub const TopBar = struct {
             h: usize = 40,
