@@ -365,9 +365,7 @@ pub fn main(init: std.process.Init) !void {
                                 sdl.SCANCODE_LEFT => {
                                     if (c.cursor_idx > 0) {
                                         var new_idx = c.cursor_idx - 1;
-                                        while (new_idx > 0 and (c.input.items[new_idx] & 0xc0) == 0x80) {
-                                            new_idx -= 1;
-                                        }
+                                        while (new_idx > 0 and c.input.items[new_idx] & 0xc0 == 0x80) : (new_idx -= 1) {}
                                         c.cursor_idx = new_idx;
                                         ui.text_cursor.last_toggle = sdl.getTicks();
                                         ui.text_cursor.visible = true;
@@ -376,9 +374,7 @@ pub fn main(init: std.process.Init) !void {
                                 sdl.SCANCODE_RIGHT => {
                                     if (c.cursor_idx < c.input.items.len) {
                                         var new_idx = c.cursor_idx + 1;
-                                        while (new_idx < c.input.items.len and (c.input.items[new_idx] & 0xc0) == 0x80) {
-                                            new_idx += 1;
-                                        }
+                                        while (new_idx < c.input.items.len and c.input.items[new_idx] & 0xc0 == 0x80) : (new_idx += 1) {}
                                         c.cursor_idx = new_idx;
                                         ui.text_cursor.last_toggle = sdl.getTicks();
                                         ui.text_cursor.visible = true;
@@ -388,9 +384,7 @@ pub fn main(init: std.process.Init) !void {
                                     const txt = &c.input;
                                     if (c.cursor_idx > 0) {
                                         var new_idx = c.cursor_idx - 1;
-                                        while (new_idx > 0 and (txt.items[new_idx] & 0xc0) == 0x80) {
-                                            new_idx -= 1;
-                                        }
+                                        while (new_idx > 0 and txt.items[new_idx] & 0xc0 == 0x80) : (new_idx -= 1) {}
                                         const count = c.cursor_idx - new_idx;
                                         std.mem.copyForwards(u8, txt.items[new_idx..], txt.items[c.cursor_idx..]);
                                         txt.shrinkRetainingCapacity(txt.items.len - count);
@@ -529,7 +523,7 @@ pub fn main(init: std.process.Init) !void {
                             },
                             .err => |e| {
                                 if (parsed_value.id) |id| {
-                                    if (state.pset.find(.{ .id = id, .cidx = 0, .midx = 0 })) |node| {
+                                    if (state.pset.find(.{ .id = id })) |node| {
                                         const mapping = node.key;
                                         state.clients.items[mapping.cidx].msgs.items[mapping.midx].state = .err;
                                         state.pset.remove(node.key);
@@ -538,7 +532,7 @@ pub fn main(init: std.process.Init) !void {
                                 std.debug.print("Server error: {s}\n", .{e});
                             },
                             .ack => |id| {
-                                if (state.pset.find(.{ .id = id, .cidx = 0, .midx = 0 })) |node| {
+                                if (state.pset.find(.{ .id = id })) |node| {
                                     const mapping = node.key;
                                     state.clients.items[mapping.cidx].msgs.items[mapping.midx].state = .sent;
                                     state.pset.remove(node.key);
@@ -625,22 +619,11 @@ pub fn main(init: std.process.Init) !void {
 
             const inner_color = gui.washColor(crect_bg, .{});
             const border_color = gui.washColor(crect_bg, .{ .n = 11 });
-            _ = gui.drawBRect(
-                g_renderer,
-                &r_crect,
-                @floatFromInt(ui.user_box.pad),
-                border_color,
-                inner_color,
-            );
+            _ = gui.drawBRect(g_renderer, &r_crect, @floatFromInt(ui.user_box.pad), border_color, inner_color);
 
             const nulled_name = try aa.dupeZ(u8, c.name);
             defer aa.free(nulled_name);
-            if (sdl.ttf.renderTextBlended(
-                ui.font,
-                nulled_name[0..c.name.len :0],
-                c.name.len,
-                ui.font_color,
-            )) |surf| {
+            if (sdl.ttf.renderTextBlended(ui.font, nulled_name[0..c.name.len :0], c.name.len, ui.font_color)) |surf| {
                 defer sdl.surface.destroy(surf);
                 if (sdl.createTextureFromSurface(g_renderer, surf)) |tex| {
                     defer sdl.destroyTexture(tex);
@@ -653,12 +636,7 @@ pub fn main(init: std.process.Init) !void {
                             .w = tex_w,
                             .h = tex_h,
                         };
-                        _ = sdl.renderTexture(
-                            g_renderer,
-                            tex,
-                            null,
-                            &name_tex_rect,
-                        );
+                        _ = sdl.renderTexture(g_renderer, tex, null, &name_tex_rect);
                     }
                 }
             }
@@ -950,7 +928,7 @@ pub fn main(init: std.process.Init) !void {
                             defer sdl.destroyTexture(tex);
                             var w: f32, var h: f32 = .{ 0, 0 };
                             if (sdl.getTextureSize(tex, &w, &h)) {
-                                msg_y -= (h + 15); // 15px spacing
+                                msg_y -= (h + 15); // net 5x spacing
                                 if (msg_y > @as(f32, @floatFromInt(chat_win.h))) continue; // below view
                                 if (msg_y + h < @as(f32, @floatFromInt(tb.h))) break; // out of view
 

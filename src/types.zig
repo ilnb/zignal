@@ -170,7 +170,7 @@ pub const GClient = struct {
     pub const Info = struct { rid: usize, name: []u8, online: bool };
     pub const MsgState = enum { pending, sent, err };
     pub const Msg = struct { rid: usize, buf: []u8, id: usize, state: MsgState = .sent };
-    pub const PktMsgMap = struct { id: usize, cidx: usize, midx: usize };
+    pub const PktMsgMap = struct { id: usize, cidx: usize = 0, midx: usize = 0 };
 
     rid: usize = undefined,
     name: ?[]u8 = null,
