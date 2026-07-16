@@ -161,6 +161,7 @@ pub const GClient = struct {
     pub const Client = struct {
         msgs: AL(Msg) = .empty,
         input: AL(u8) = .empty,
+        cursor_idx: usize = 0,
         name: []u8,
         rid: usize,
         connected: bool = false,

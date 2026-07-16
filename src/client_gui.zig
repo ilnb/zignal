@@ -356,23 +356,53 @@ pub fn main(init: std.process.Init) !void {
                         },
                         .input => {
                             const c = &state.clients.items[ui.curr_user.?];
+                            c.cursor_idx = @min(c.cursor_idx, c.input.items.len);
                             switch (sc) {
                                 sdl.SCANCODE_ESCAPE => {
                                     ui.mouse = .on_chat;
                                     _ = sdl.stopTextInput(g_window);
                                 },
+                                sdl.SCANCODE_LEFT => {
+                                    if (c.cursor_idx > 0) {
+                                        var new_idx = c.cursor_idx - 1;
+                                        while (new_idx > 0 and (c.input.items[new_idx] & 0xc0) == 0x80) {
+                                            new_idx -= 1;
+                                        }
+                                        c.cursor_idx = new_idx;
+                                        ui.text_cursor.last_toggle = sdl.getTicks();
+                                        ui.text_cursor.visible = true;
+                                    }
+                                },
+                                sdl.SCANCODE_RIGHT => {
+                                    if (c.cursor_idx < c.input.items.len) {
+                                        var new_idx = c.cursor_idx + 1;
+                                        while (new_idx < c.input.items.len and (c.input.items[new_idx] & 0xc0) == 0x80) {
+                                            new_idx += 1;
+                                        }
+                                        c.cursor_idx = new_idx;
+                                        ui.text_cursor.last_toggle = sdl.getTicks();
+                                        ui.text_cursor.visible = true;
+                                    }
+                                },
                                 sdl.SCANCODE_BACKSPACE => {
                                     const txt = &c.input;
-                                    // pop utf chars
-                                    while (utils.back(txt.items)) |tc| {
-                                        if (tc & 0xc0 != 0x80) break;
-                                        _ = txt.pop();
+                                    if (c.cursor_idx > 0) {
+                                        var new_idx = c.cursor_idx - 1;
+                                        while (new_idx > 0 and (txt.items[new_idx] & 0xc0) == 0x80) {
+                                            new_idx -= 1;
+                                        }
+                                        const count = c.cursor_idx - new_idx;
+                                        std.mem.copyForwards(u8, txt.items[new_idx..], txt.items[c.cursor_idx..]);
+                                        txt.shrinkRetainingCapacity(txt.items.len - count);
+                                        c.cursor_idx = new_idx;
+                                        ui.chat_win.input_box.scroll = std.math.floatMax(f32);
                                     }
-                                    if (txt.items.len > 0) _ = txt.pop();
                                 },
                                 sdl.SCANCODE_RETURN => {
                                     if ((sdl.getModState() & sdl.keycode.KMOD_SHIFT) != 0) {
-                                        c.input.append(ga, '\n') catch {};
+                                        c.input.insert(ga, c.cursor_idx, '\n') catch {};
+                                        c.cursor_idx += 1;
+                                        ui.chat_win.input_box.scroll = std.math.floatMax(f32);
                                     } else {
                                         const ibuf = c.input.items;
                                         const trimmed = std.mem.trim(u8, ibuf, " \n\r\t");
@@ -399,6 +429,7 @@ pub fn main(init: std.process.Init) !void {
                                             }) catch return;
                                         }
                                         c.input.shrinkRetainingCapacity(0);
+                                        c.cursor_idx = 0;
                                     }
                                 },
                                 else => {},
@@ -425,8 +456,19 @@ pub fn main(init: std.process.Init) !void {
                         .input => {
                             const text = std.mem.sliceTo(ev.text.text, 0);
                             const c = &state.clients.items[ui.curr_user.?];
+                            c.cursor_idx = @min(c.cursor_idx, c.input.items.len);
+                            var valid_buf: [32]u8 = undefined;
+                            var v_idx: usize = 0;
                             for (text) |ch| {
-                                if (ch >= 32) try c.input.append(state.ga, ch);
+                                if (ch >= 32) {
+                                    valid_buf[v_idx] = ch;
+                                    v_idx += 1;
+                                }
+                            }
+                            if (v_idx > 0) {
+                                c.input.insertSlice(state.ga, c.cursor_idx, valid_buf[0..v_idx]) catch {};
+                                c.cursor_idx += v_idx;
+                                ui.chat_win.input_box.scroll = std.math.floatMax(f32);
                             }
                         },
                     }
@@ -661,6 +703,10 @@ pub fn main(init: std.process.Init) !void {
             ui.chat_win.input_box.h = @intCast(@as(usize, @intFromFloat(@min(max_input_h, target_h))));
             ui.chat_win.h = ui.h - ui.chat_win.input_box.h;
 
+            ui.chat_win.input_box.tex_h = tex_h;
+            const max_input_scroll = @max(0.0, tex_h - (@as(f32, @floatFromInt(ui.chat_win.input_box.h)) - 20.0));
+            ui.chat_win.input_box.scroll = std.math.clamp(ui.chat_win.input_box.scroll, 0.0, max_input_scroll);
+
             const chat_win = ui.chat_win;
             if (!c.connected) {
                 const btn_w = 200;
@@ -770,7 +816,7 @@ pub fn main(init: std.process.Init) !void {
 
                                 // calculate cursor_x based on the last line
                                 var last_line_start: usize = 0;
-                                const raw_input = c.input.items;
+                                const raw_input = c.input.items[0..@min(c.cursor_idx, c.input.items.len)];
                                 for (raw_input, 0..) |char, i| {
                                     if (char == '\n') last_line_start = i + 1;
                                 }
@@ -804,9 +850,26 @@ pub fn main(init: std.process.Init) !void {
                                     cursor_x += @as(f32, @floatFromInt(final_w));
                                 }
 
+                                var cursor_y_offset: f32 = 0;
+                                if (c.cursor_idx > 0) {
+                                    var sub_buf = AL(u8).empty;
+                                    defer sub_buf.deinit(ga);
+                                    sub_buf.appendSlice(ga, raw_input) catch {};
+                                    if (sub_buf.items.len > 0 and utils.back(sub_buf.items) == '\n') {
+                                        sub_buf.append(ga, ' ') catch {};
+                                    }
+                                    sub_buf.append(ga, 0) catch {};
+                                    if (sdl.ttf.renderTextBlendedWrapped(ui.font, sub_buf.items[0 .. sub_buf.items.len - 1 :0].ptr, sub_buf.items.len - 1, ui.font_color, wrap_len)) |s| {
+                                        cursor_y_offset = @max(0.0, @as(f32, @floatFromInt(s.h)) - cursor_h);
+                                        sdl.surface.destroy(s);
+                                    }
+                                }
+
                                 var text_y_start: f32 = input_box.y + 10.0;
                                 if (tex_h < input_box.h - 20.0) {
                                     text_y_start = input_box.y + (input_box.h - tex_h) / 2.0;
+                                } else {
+                                    text_y_start = input_box.y + 10.0 - ui.chat_win.input_box.scroll;
                                 }
                                 // Place cursor at the right line
                                 cursor_y = text_y_start + cursor_y_offset;
