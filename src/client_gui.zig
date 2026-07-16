@@ -836,7 +836,7 @@ pub fn main(init: std.process.Init) !void {
 
                     const m_color = if (msg.state == .pending) sdl.Color{ .r = 100, .g = 100, .b = 100 } else ui.font_color;
 
-                    const wrap_len: c_int = @as(c_int, @intCast(chat_win.w)) - 80;
+                    const wrap_len = @as(c_int, @intCast(chat_win.w)) - 80;
                     if (sdl.ttf.renderTextBlendedWrapped(
                         ui.font,
                         msg_txt.items[0 .. msg_txt.items.len - 1 :0].ptr,
@@ -849,7 +849,7 @@ pub fn main(init: std.process.Init) !void {
                             defer sdl.destroyTexture(tex);
                             var w: f32, var h: f32 = .{ 0, 0 };
                             if (sdl.getTextureSize(tex, &w, &h)) {
-                                msg_y -= (h + 10); // 10px spacing
+                                msg_y -= (h + 15); // 15px spacing
                                 if (msg_y > @as(f32, @floatFromInt(chat_win.h))) continue; // below view
                                 if (msg_y + h < @as(f32, @floatFromInt(tb.h))) break; // out of view
 
@@ -857,7 +857,7 @@ pub fn main(init: std.process.Init) !void {
                                     .x = if (is_own)
                                         @as(f32, @floatFromInt(chat_win.x + chat_win.w - 20)) - w
                                     else
-                                        @as(f32, @floatFromInt(chat_win.x + 20)),
+                                        @floatFromInt(chat_win.x + 20),
                                     .y = msg_y,
                                     .w = w,
                                     .h = h,
