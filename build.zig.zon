@@ -3,8 +3,8 @@
     .version = "0.0.0",
     .dependencies = .{
         .zsdl3 = .{
-            .url = "git+https://github.com/ilnb/zsdl3?ref=master#69d4856000982ff65314d5c09daefce38fd81916",
-            .hash = "zsdl3-0.0.0-l0pNpJA-BQA2DNnfBS3A1zAzarINgVeUIHy_4uR0Ubx_",
+            .url = "git+https://github.com/ilnb/zsdl3.git?ref=master#b7367fa359ff3f0cbd26488c1759a16096a4bc43",
+            .hash = "zsdl3-0.0.0-l0pNpEsFBwBAbcAQLgjB1xkucznJYJ6cV2lqn_RP_g1q",
         },
     },
     .fingerprint = 0x5a6dd5f6998506b2,

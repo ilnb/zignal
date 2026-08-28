@@ -128,7 +128,7 @@ pub fn main(init: std.process.Init) !void {
     ui.chat_win.h = ui.h - ui.chat_win.input_box.h;
     ui.chat_win.input_box.w = ui.chat_win.w - 3 * ui.chat_win.pad - 2 * ui.chat_win.send_r;
 
-    if (!sdl.init(sdl.INIT_VIDEO)) {
+    if (!sdl.init(.video)) {
         std.debug.print("Failed to init sdl window: {s}\n", .{sdl.getError() orelse "Unknown"});
         return;
     }
@@ -190,18 +190,18 @@ pub fn main(init: std.process.Init) !void {
         var ev: sdl.Event = undefined;
         while (sdl.pollEvent(&ev)) {
             switch (ev.type) {
-                sdl.EVENT_QUIT => {
+                sdl.event_quit => {
                     G.running.store(false, .release);
                     try G.stream.shutdown(G.io, .recv);
                 },
 
-                sdl.EVENT_MOUSE_MOTION => {
+                sdl.event_mouse_motion => {
                     ui.cursor = .{
                         .x = ev.motion.x,
                         .y = ev.motion.y,
                     };
                 },
-                sdl.EVENT_MOUSE_WHEEL => {
+                sdl.event_mouse_wheel => {
                     const my = ev.wheel.y;
                     const scroll_speed: f32 = 30.0;
                     lbl: switch (ui.mouse) {
@@ -225,7 +225,7 @@ pub fn main(init: std.process.Init) !void {
                     }
                 },
 
-                sdl.EVENT_MOUSE_BUTTON_DOWN => {
+                sdl.event_mouse_button_down => {
                     const mx: usize = @floor(@max(0.0, ui.cursor.x));
                     const my: usize = @floor(@max(0.0, ui.cursor.y));
                     const len = state.clients.items.len;
@@ -337,7 +337,7 @@ pub fn main(init: std.process.Init) !void {
                     }
                 },
 
-                sdl.EVENT_KEY_DOWN => {
+                sdl.event_key_down => {
                     const sc = ev.key.scancode;
                     if (keys_held[@intCast(sc)]) {
                         ignore_text_input = true;
@@ -358,11 +358,11 @@ pub fn main(init: std.process.Init) !void {
                             const c = &state.clients.items[ui.curr_user.?];
                             c.cursor_idx = @min(c.cursor_idx, c.input.items.len);
                             switch (sc) {
-                                sdl.SCANCODE_ESCAPE => {
+                                sdl.scancode_escape => {
                                     ui.mouse = .on_chat;
                                     _ = sdl.stopTextInput(g_window);
                                 },
-                                sdl.SCANCODE_LEFT => {
+                                sdl.scancode_left => {
                                     if (c.cursor_idx > 0) {
                                         var new_idx = c.cursor_idx - 1;
                                         while (new_idx > 0 and c.input.items[new_idx] & 0xc0 == 0x80) : (new_idx -= 1) {}
@@ -371,7 +371,7 @@ pub fn main(init: std.process.Init) !void {
                                         ui.text_cursor.visible = true;
                                     }
                                 },
-                                sdl.SCANCODE_RIGHT => {
+                                sdl.scancode_right => {
                                     if (c.cursor_idx < c.input.items.len) {
                                         var new_idx = c.cursor_idx + 1;
                                         while (new_idx < c.input.items.len and c.input.items[new_idx] & 0xc0 == 0x80) : (new_idx += 1) {}
@@ -380,7 +380,7 @@ pub fn main(init: std.process.Init) !void {
                                         ui.text_cursor.visible = true;
                                     }
                                 },
-                                sdl.SCANCODE_BACKSPACE => {
+                                sdl.scancode_backspace => {
                                     const txt = &c.input;
                                     if (c.cursor_idx > 0) {
                                         var new_idx = c.cursor_idx - 1;
@@ -392,8 +392,8 @@ pub fn main(init: std.process.Init) !void {
                                         ui.chat_win.input_box.scroll = std.math.floatMax(f32);
                                     }
                                 },
-                                sdl.SCANCODE_RETURN => {
-                                    if ((sdl.getModState() & sdl.keycode.KMOD_SHIFT) != 0) {
+                                sdl.scancode_return => {
+                                    if ((sdl.getModState() & sdl.keycode.kmod_shift) != 0) {
                                         c.input.insert(ga, c.cursor_idx, '\n') catch {};
                                         c.cursor_idx += 1;
                                         ui.chat_win.input_box.scroll = std.math.floatMax(f32);
@@ -432,9 +432,9 @@ pub fn main(init: std.process.Init) !void {
                     }
                 },
 
-                sdl.EVENT_KEY_UP => keys_held[@intCast(ev.key.scancode)] = false,
+                sdl.event_key_up => keys_held[@intCast(ev.key.scancode)] = false,
 
-                sdl.EVENT_TEXT_INPUT => {
+                sdl.event_text_input => {
                     if (ignore_text_input) {
                         ignore_text_input = false;
                         continue;
